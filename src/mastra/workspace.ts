@@ -1,8 +1,9 @@
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { LocalFilesystem, LocalSandbox, WORKSPACE_TOOLS, Workspace } from '@mastra/core/workspace';
-import { KIRA_HOME, PROJECT_DIR, SKILLS_DIR } from './config';
+import { GLOBAL_SKILLS_DIR, KIRA_HOME, PROJECT_DIR, SKILLS_DIR } from './config';
 import { getControllerContext, type RequestContextLike } from './controller-context';
+import { skillPaths } from './skills';
 
 /** Where the agent writes plans it submits for approval. */
 export const PLANS_DIR = '.kira/plans';
@@ -121,12 +122,17 @@ export const workspace = new Workspace({
   name: 'kira-code workspace',
   filesystem: new LocalFilesystem({
     basePath: PROJECT_DIR,
-    allowedPaths: [SKILLS_DIR],
+    // Both skill roots that sit outside the project: without them skill_read
+    // could not open the reference files next to a built-in or global skill.
+    allowedPaths: [SKILLS_DIR, GLOBAL_SKILLS_DIR],
   }),
   sandbox: new LocalSandbox({
     workingDirectory: PROJECT_DIR,
   }),
-  skills: [SKILLS_DIR],
+  // One path per skill rather than the roots: see skills.ts — two local skills
+  // with the same name make Mastra's own tie-break throw, so the arbitration
+  // happens before it, and only the winners are handed over.
+  skills: skillPaths,
   // Semantic navigation via language servers. kira-code ships the TypeScript
   // one as a devDependency; servers for other languages are picked up from PATH
   // when they happen to be installed, and lsp_inspect simply reports that none

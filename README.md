@@ -19,6 +19,7 @@ Two front ends over the same agent, sharing threads and memory: a **terminal CLI
 - Prompt caching on Anthropic models, with a rolling cache breakpoint that follows the conversation
 - Context compaction, automatic on a token threshold and on demand with `/compact`
 - Project instructions: `AGENTS.md` is loaded at the start, nested ones when the agent enters their subtree
+- Skills from three sources — kira-code's own, yours, and the project's — with `/skills` and `/skill`
 
 ## Get started
 
@@ -135,6 +136,29 @@ Updating it does not ask for approval: it is the agent's own state, not a projec
 
 `scripts/reset-working-memory.ts` clears the stored documents — needed once after a template change, since existing content keeps being sent until the agent rewrites it.
 
+## Skills
+
+A skill is a folder with a `SKILL.md` — frontmatter (`name`, `description`, optionally `user-invocable`) and instructions the agent follows when the task calls for them. Only name, description and path ride in the prompt; the body is read on demand, so twenty skills cost about as much as one.
+
+Three sources, weakest first:
+
+| source | path | for |
+| --- | --- | --- |
+| built-in | `<install>/skills`, `KIRA_SKILLS_DIR` | what kira-code ships with |
+| global | `~/.kira/skills`, `KIRA_GLOBAL_SKILLS_DIR` | yours, on every project |
+| project | `<project>/.kira/skills` | the conventions of that repo |
+
+On a name clash the most specific source wins — a project's `code-review` replaces the built-in one. That arbitration is ours and it is not cosmetic: Mastra sorts candidates by source *type*, and since all three of ours are `local` its tie-break **throws** (`Cannot resolve skill "code-review": multiple local skills found at …`) instead of choosing. `src/mastra/skills.ts` picks the winner first and hands Mastra one path per surviving skill; `/skills` shows what was hidden.
+
+```
+/skills                    what is available, and where it comes from
+/skill <name> [text]       use one now
+```
+
+`/skill` checks the name locally before sending anything, so a typo costs a line of output instead of a model call, and a skill marked `user-invocable: false` is refused.
+
+Project skills are instructions from the checkout, like `AGENTS.md`, so `KIRA_INSTRUCTIONS=off` drops them too — built-in and global ones stay, because those are yours. The two directories outside the project are reachable through `allowedPaths` so `skill_read` can open a skill's reference files; that exception is not read-only, so the agent can also write there, behind the usual `edit` approval.
+
 ## Context compaction
 
 Long threads outgrow the context window. Observational memory folds older messages into an observation log and drops them from the request: the thread continues, the raw history stays in the database, and what the model sees is a summary instead of the transcript.
@@ -182,6 +206,7 @@ Hiding the shell is cache-safe because the workspace registers the sandbox tools
 - `src/mastra/agents/explore-agent.ts` — the read-only search subagent
 - `src/mastra/workspace.ts` — tool names, approval and mode policy, LSP, search
 - `src/mastra/models.ts` — model roles, defaults, runtime overrides
+- `src/mastra/skills.ts` — the three skill sources, and who wins a name clash
 - `src/mastra/memory.ts` — memory instance, observation and reflection models
 - `src/mastra/context.ts` — compaction thresholds from the model's context window
 - `src/mastra/context-state.ts` — what the thread occupies, as the model sees it

@@ -1,7 +1,7 @@
 import type { ToolCategory } from '@mastra/core/agent-controller';
 import { WORKSPACE_TOOLS } from '@mastra/core/workspace';
 
-/** Tools that only observe the project. */
+/** Tools that only observe — the project, or the skills available for it. */
 export const READ_TOOLS = [
   'view',
   'find_files',
@@ -11,6 +11,12 @@ export const READ_TOOLS = [
   WORKSPACE_TOOLS.SEARCH.SEARCH,
   // Indexing writes to the search index, never to the project.
   WORKSPACE_TOOLS.SEARCH.INDEX,
+  // Skills are instructions the agent reads to work better. Left unclassified
+  // they fall through to the gated default, so loading one costs an approval
+  // prompt — and a declined prompt leaves the agent working without it.
+  'skill',
+  'skill_search',
+  'skill_read',
 ];
 
 /** Tools that change files. */

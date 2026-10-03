@@ -23,6 +23,7 @@ import { controller } from './mastra/controller';
 import { mastra } from './mastra/index';
 import { memory } from './mastra/memory';
 import { defaultModel } from './mastra/models';
+import { listSkills } from './mastra/skills';
 
 const color = {
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
@@ -57,6 +58,9 @@ async function ask(prompt: string): Promise<string | null> {
 const printed = new Map<string, string>();
 /** Resolves when the active run reaches a terminal state. */
 let runFinished: (() => void) | null = null;
+
+/** A turn a command wants sent on its behalf — see `/skill`. */
+let queuedPrompt: string | null = null;
 
 /** Last context notice printed, so a stable window doesn't repeat every step. */
 let lastContextNotice = '';
@@ -432,6 +436,8 @@ Commands:
   /cache [off|5m|1h]        show or set the prompt-cache TTL
   /context                  how much of the context window is in use
   /compact [instructions]   compact now: fold messages into observations
+  /skills                   list the skills available, and where they come from
+  /skill <name> [text]      use a skill in this turn
   /perm <category> <policy> set a permission (read|edit|execute|other × allow|ask|deny)
   /perms                    show current permission rules
   /new [title]              start a new thread
@@ -499,6 +505,49 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
     case 'new': {
       const thread = await session.thread.create({ title: arg || undefined });
       console.log(color.dim(`new thread ${thread.id}`));
+      return true;
+    }
+
+    case 'skills': {
+      const skills = listSkills();
+      if (skills.length === 0) {
+        console.log(color.dim('no skills found'));
+        return true;
+      }
+
+      for (const skill of skills) {
+        const flags = skill.userInvocable ? skill.source : `${skill.source}, not user-invocable`;
+        console.log(`${skill.name}  ${color.dim(`(${flags})`)}`);
+        if (skill.description) console.log(color.dim(`  ${skill.description}`));
+        if (skill.shadows) console.log(color.dim(`  hides ${skill.shadows}`));
+      }
+      return true;
+    }
+
+    case 'skill': {
+      const [name, ...args] = rest;
+      const skills = listSkills();
+
+      if (!name) {
+        console.log(color.dim('usage: /skill <name> [instructions]'));
+        return true;
+      }
+
+      // Checked here rather than sent and left to the model: a typo should cost
+      // a line of output, not a model call that ends in "no such skill".
+      const skill = skills.find(candidate => candidate.name === name);
+      if (!skill) {
+        console.log(color.red(`no skill named "${name}"`));
+        console.log(color.dim(`available: ${skills.map(candidate => candidate.name).join(', ') || 'none'}`));
+        return true;
+      }
+
+      if (!skill.userInvocable) {
+        console.log(color.red(`"${name}" is marked user-invocable: false — the agent loads it on its own`));
+        return true;
+      }
+
+      queuedPrompt = `Use the \`${name}\` skill.${args.length > 0 ? ` ${args.join(' ')}` : ''}`;
       return true;
     }
 
@@ -584,9 +633,15 @@ async function main(): Promise<void> {
       const line = input.trim();
       if (!line) continue;
 
+      let content = line;
+
       if (line.startsWith('/')) {
         if (!(await runCommand(session, line))) break;
-        continue;
+        // Most commands are done here; /skill asks for a turn to be sent.
+        if (!queuedPrompt) continue;
+        content = queuedPrompt;
+        queuedPrompt = null;
+        console.log(color.dim(content));
       }
 
       const finished = new Promise<void>(resolveRun => {
@@ -594,7 +649,7 @@ async function main(): Promise<void> {
       });
 
       try {
-        await session.sendMessage({ content: line, requestContext: runRequestContext() });
+        await session.sendMessage({ content, requestContext: runRequestContext() });
         await finished;
       } catch (error) {
         console.error(color.red(`\n${error instanceof Error ? error.message : String(error)}`));

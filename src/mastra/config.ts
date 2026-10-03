@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 
 /**
@@ -70,3 +71,14 @@ export const PLATFORM = process.platform;
  * with kira-code itself, so they live outside the project being worked on.
  */
 export const SKILLS_DIR = resolve(process.env.KIRA_SKILLS_DIR?.trim() || resolve(KIRA_HOME, 'skills'));
+
+/**
+ * Skills that belong to you rather than to an installation or a repository:
+ * they apply to every project kira-code is pointed at.
+ */
+export const GLOBAL_SKILLS_DIR = resolve(
+  process.env.KIRA_GLOBAL_SKILLS_DIR?.trim() || resolve(homedir(), '.kira/skills'),
+);
+
+/** Skills that belong to the project being worked on, and travel with it. */
+export const PROJECT_SKILLS_DIR = resolve(PROJECT_DIR, '.kira/skills');
