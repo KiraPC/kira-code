@@ -1,0 +1,114 @@
+import type { ProcessLLMRequestArgs, Processor } from '@mastra/core/processors';
+import { cacheControlOptions, isAnthropicModel, resolveCacheSetting } from '../cache';
+
+/**
+ * Rolling cache breakpoints over the conversation.
+ *
+ * The system prompt carries its own breakpoint (see `prompts/system.ts`), which
+ * covers the largest fixed span. This processor covers the part that grows: as
+ * the conversation gets longer, the breakpoints move forward with it so each
+ * turn extends the cached prefix instead of rebuilding it.
+ *
+ * Two hard limits from the API shape the placement:
+ *
+ * 1. A request may carry at most 4 breakpoints. One is spent on the system
+ *    prompt, leaving 3 here.
+ * 2. A breakpoint looks back at most 20 content blocks to find the previous
+ *    cache entry. A single agentic turn easily adds more than 20 blocks (tool
+ *    call + tool result per step), so without intermediate breakpoints the next
+ *    request finds nothing and misses the cache — silently, with no error.
+ *
+ * This runs in `processLLMRequest` on purpose: changes there apply to the
+ * outbound request only and are never persisted to the message list, memory or
+ * history. Cache markers are a property of one call, not of the conversation.
+ */
+const MAX_MESSAGE_BREAKPOINTS = 3;
+
+/** Kept under the API's 20-block lookback, with room for the next turn's blocks. */
+const MAX_BLOCKS_BETWEEN_BREAKPOINTS = 15;
+
+type PromptMessage = ProcessLLMRequestArgs['prompt'][number];
+
+function contentBlockCount(message: PromptMessage): number {
+  return Array.isArray(message.content) ? message.content.length : 1;
+}
+
+/**
+ * Indexes of the messages to mark, newest first, spaced so no gap exceeds the
+ * lookback window.
+ */
+function chooseBreakpoints(prompt: ProcessLLMRequestArgs['prompt']): number[] {
+  const chosen: number[] = [];
+  let blocksSinceLast = 0;
+
+  for (let index = prompt.length - 1; index >= 0; index--) {
+    const message = prompt[index];
+    // A system message is already covered by the instructions breakpoint.
+    if (!message || message.role === 'system' || !Array.isArray(message.content)) continue;
+    if (message.content.length === 0) continue;
+
+    // Always anchor the newest eligible message: that is the point the next
+    // request will look back to.
+    if (chosen.length === 0 || blocksSinceLast >= MAX_BLOCKS_BETWEEN_BREAKPOINTS) {
+      chosen.push(index);
+      blocksSinceLast = 0;
+      if (chosen.length === MAX_MESSAGE_BREAKPOINTS) break;
+    }
+
+    blocksSinceLast += contentBlockCount(message);
+  }
+
+  return chosen;
+}
+
+export const promptCacheProcessor = {
+  id: 'prompt-cache',
+
+  processLLMRequest({ prompt, model, requestContext }: ProcessLLMRequestArgs) {
+    const providerOptions = cacheControlOptions(resolveCacheSetting(requestContext));
+    if (!providerOptions) return;
+    if (!isAnthropicModel(model?.modelId)) return;
+
+    const targets = chooseBreakpoints(prompt);
+    if (targets.length === 0) return;
+
+    // Copy rather than mutate: the prompt array is the runtime's, and this
+    // rewrite is only meant to apply to the current call.
+    const next = prompt.map((message, index) => {
+      if (!targets.includes(index) || !Array.isArray(message.content)) return message;
+
+      const content = [...message.content];
+      const last = content[content.length - 1];
+      if (!last) return message;
+
+      content[content.length - 1] = {
+        ...last,
+        providerOptions: { ...last.providerOptions, ...providerOptions },
+      };
+
+      return { ...message, content } as PromptMessage;
+    });
+
+    if (process.env.KIRA_DEBUG) {
+      for (const [index, message] of prompt.entries()) {
+        if (message.role !== 'system') continue;
+        const text = typeof message.content === 'string' ? message.content : '';
+        let hash = 5381;
+        for (let i = 0; i < text.length; i++) hash = ((hash * 33) ^ text.charCodeAt(i)) >>> 0;
+        console.log(
+          `[cache] system[${index}] ${text.length}ch #${hash.toString(16)}: ${text.slice(0, 40).replace(/\n/g, ' ')}`,
+        );
+      }
+    }
+
+    if (process.env.KIRA_DEBUG) {
+      console.log(
+        `[cache] breakpoints on messages ${targets.join(', ')} of ${prompt.length} (${
+          providerOptions.anthropic.cacheControl.ttl ?? '5m'
+        })`,
+      );
+    }
+
+    return { prompt: next };
+  },
+} satisfies Processor;
