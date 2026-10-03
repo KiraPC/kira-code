@@ -123,6 +123,18 @@ So `agents/kira-code.ts` lists the memory processors explicitly, after this one.
 
 `KIRA_INSTRUCTIONS=off` disables both halves. Instruction files are executable text from the checkout, and a branch under review is not always trusted.
 
+## Working memory
+
+The one thing that survives between sessions. It is a single markdown document **per project** — the resource is the project directory, not the thread — rewritten through `updateWorkingMemory` and re-sent as a system block on every request.
+
+Left without a template Mastra fills in a user profile (first name, location, interests), which a coding agent never learns and never needs; ours holds what is actually worth carrying: the current task, decisions already settled, environment quirks, and how the user wants to be worked with. The template also asks for pruning, because the instruction Mastra puts above it does the opposite — *"If you're unsure whether to store something, store it"*.
+
+Measured on a filled document: the test command stated in one session was answered from memory in the next, with no file read, and the document stayed at 137 characters over the following turns instead of growing a line per turn.
+
+Updating it does not ask for approval: it is the agent's own state, not a project file, so it sits in the `other` permission category alongside the interactive tools.
+
+`scripts/reset-working-memory.ts` clears the stored documents — needed once after a template change, since existing content keeps being sent until the agent rewrites it.
+
 ## Context compaction
 
 Long threads outgrow the context window. Observational memory folds older messages into an observation log and drops them from the request: the thread continues, the raw history stays in the database, and what the model sees is a summary instead of the transcript.

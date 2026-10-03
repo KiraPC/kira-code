@@ -40,6 +40,10 @@ export const INTERACTION_TOOLS = [
   'agent-explore',
   'web_search',
   'web_fetch',
+  // Working memory is the agent's own state, not a project file. Left
+  // unclassified it falls through to the gated default, and every note the
+  // agent wants to keep costs the user an approval prompt.
+  'updateWorkingMemory',
 ];
 
 const CATEGORY_BY_TOOL = new Map<string, ToolCategory>([
