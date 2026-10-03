@@ -68,6 +68,23 @@ function contentBlockCount(message: PromptMessage): number {
 }
 
 /**
+ * The first system message — ours, the one built to be byte-identical.
+ *
+ * Mastra Code marks the *last* system block instead, which covers the blocks
+ * Mastra appends after ours (task list, workspace, skills, working memory).
+ * Measured here, that is worse: the task-list block comes and goes between
+ * requests (6 system blocks on one turn, 5 on the next), and it sits ahead of
+ * the others, so a span that includes it is invalidated whenever it toggles.
+ * Our own block hashed identical across every request.
+ *
+ * The appended blocks are covered by the rolling message breakpoints anyway,
+ * since a breakpoint on a message covers every system block before it.
+ */
+function stableSystemIndex(prompt: ProcessLLMRequestArgs['prompt']): number {
+  return prompt.findIndex(message => message?.role === 'system');
+}
+
+/**
  * Indexes of the messages to mark, newest first, spaced so no gap exceeds the
  * lookback window.
  */
@@ -121,6 +138,7 @@ export const promptCacheProcessor = {
     const existing = tools[target] as { providerOptions?: Record<string, unknown> };
     if (process.env.KIRA_DEBUG) {
       console.log(`[cache] tool breakpoint on ${target} (${names.length} tools)`);
+      console.log(`[cache] tools: ${names.join(' ')}`);
     }
 
     return {
@@ -136,13 +154,25 @@ export const promptCacheProcessor = {
     if (!providerOptions) return;
     if (!isAnthropicModel(model?.modelId)) return;
 
+    const systemIndex = stableSystemIndex(prompt);
     const targets = chooseBreakpoints(prompt);
-    if (targets.length === 0) return;
+    if (targets.length === 0 && systemIndex < 0) return;
 
     // Copy rather than mutate: the prompt array is the runtime's, and this
     // rewrite is only meant to apply to the current call.
     const next = prompt.map((message, index) => {
-      if (!targets.includes(index) || !Array.isArray(message.content)) return message;
+      const marked = targets.includes(index) || index === systemIndex;
+      if (!marked) return message;
+
+      // A system message carries a plain string rather than content parts.
+      if (typeof message.content === 'string') {
+        return {
+          ...message,
+          providerOptions: { ...message.providerOptions, ...providerOptions },
+        } as PromptMessage;
+      }
+
+      if (!Array.isArray(message.content)) return message;
 
       const content = [...message.content];
       const last = content[content.length - 1];
@@ -170,7 +200,7 @@ export const promptCacheProcessor = {
 
     if (process.env.KIRA_DEBUG) {
       console.log(
-        `[cache] breakpoints on messages ${targets.join(', ')} of ${prompt.length} (${
+        `[cache] breakpoints: system[${systemIndex}] + messages ${targets.join(', ')} of ${prompt.length} (${
           providerOptions.anthropic.cacheControl.ttl ?? '5m'
         })`,
       );

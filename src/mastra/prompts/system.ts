@@ -1,7 +1,6 @@
 import { buildBasePrompt } from '@mastra/core/coding-agent';
 import type { CoreSystemMessage } from '@mastra/core/llm';
 import type { RequestContext } from '@mastra/core/request-context';
-import { cacheControlOptions, resolveCacheSetting } from '../cache';
 import { PLATFORM, PROJECT_DIR, PROJECT_NAME } from '../config';
 
 /**
@@ -90,21 +89,12 @@ const STABLE_PROMPT = stripVolatileLines(
 );
 
 /**
- * Instructions as a single system message carrying the cache breakpoint. The
- * array form is what lets us attach `providerOptions` to it.
+ * Instructions as a single system message.
+ *
+ * The cache breakpoint is not attached here: Mastra appends more system blocks
+ * after this one, and a marker here would leave them outside the cached span.
+ * `processors/prompt-cache.ts` marks the last system block instead.
  */
-export function buildInstructions({
-  requestContext,
-}: {
-  requestContext?: RequestContext;
-} = {}): CoreSystemMessage[] {
-  const providerOptions = cacheControlOptions(resolveCacheSetting(requestContext));
-
-  return [
-    {
-      role: 'system',
-      content: STABLE_PROMPT,
-      ...(providerOptions ? { providerOptions } : {}),
-    },
-  ];
+export function buildInstructions(_args: { requestContext?: RequestContext } = {}): CoreSystemMessage[] {
+  return [{ role: 'system', content: STABLE_PROMPT }];
 }

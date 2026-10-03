@@ -27,6 +27,9 @@ export const controller = new AgentController({
   toolCategoryResolver,
   disableBuiltinTools: [
     'ask_user',
+    // Tested: letting the controller provide submit_plan instead (the way
+    // Mastra Code does) does not avoid the resume re-gate — the approved call
+    // still replays as output-denied. The workaround in cli.ts stays.
     'submit_plan',
     'task_write',
     'task_update',
@@ -39,10 +42,15 @@ export const controller = new AgentController({
       id: 'plan',
       name: 'Plan',
       description: 'Investigate and propose a plan. Cannot modify the project.',
-      // No `availableTools` allowlist here on purpose: it did not restrict the
-      // workspace tools in practice, and plan mode has to keep `write_file` so
-      // the agent can write the plan it submits. The real restriction lives in
-      // `workspace.ts`, which can look at the target path as well as the mode.
+      // No `availableTools` here, deliberately — see workspace.ts.
+      //
+      // It does work (measured: the model listed exactly the allowed tools),
+      // and it is what Mastra Code uses. But it is an allowlist: every tool
+      // the runtime adds has to be named in it or it silently disappears. Ours
+      // dropped `updateWorkingMemory` and the three skill tools without a
+      // word, and `updateWorkingMemory` sits ahead of the tool-cache
+      // breakpoint, so the tool prefix was invalidated on every mode switch
+      // too. Hiding the shell is a three-name denylist; that is what we use.
       transitionsTo: 'build',
       defaultModelId: defaultModel('main'),
     },
