@@ -3,6 +3,7 @@ import { askUserTool, submitPlanTool, webFetchTool, webSearchTool } from '@mastr
 import { PROJECT_NAME } from '../config';
 import { memory } from '../memory';
 import { kiraRequestContextSchema, resolveModel } from '../models';
+import { nestedInstructionsProcessor } from '../processors/nested-instructions';
 import { promptCacheProcessor } from '../processors/prompt-cache';
 import { sessionContextProcessor } from '../processors/session-context';
 import { buildInstructions } from '../prompts/system';
@@ -32,8 +33,22 @@ export const kiraCode = createCodingAgent({
   memory,
   agents: { explore: exploreAgent },
   // session-context delivers the volatile session facts the system prompt no
-  // longer carries; prompt-cache places the rolling cache breakpoints.
-  inputProcessors: [sessionContextProcessor, promptCacheProcessor],
+  // longer carries; nested-instructions surfaces the AGENTS.md of whatever
+  // subtree the agent is working in; prompt-cache places the rolling cache
+  // breakpoints.
+  //
+  // The memory processors are listed explicitly, and the order is load-bearing.
+  // Left implicit, Mastra puts them *first* — and the observational-memory one
+  // takes over the message bucket that nested-instructions reads its tool calls
+  // from, so nested instructions would silently never appear. Listing them here
+  // is the supported way to say otherwise: `getInputProcessors` skips any
+  // processor whose id is already configured, so nothing is registered twice.
+  inputProcessors: async ({ requestContext }) => [
+    sessionContextProcessor,
+    nestedInstructionsProcessor,
+    ...(await memory.getInputProcessors([], requestContext)),
+    promptCacheProcessor,
+  ],
   tools: {
     ask_user: askUserTool,
     submit_plan: submitPlanTool,

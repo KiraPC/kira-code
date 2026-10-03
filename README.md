@@ -18,6 +18,7 @@ Two front ends over the same agent, sharing threads and memory: a **terminal CLI
 - Multi-model: any provider of the [Mastra model router](https://mastra.ai/models), switchable at runtime
 - Prompt caching on Anthropic models, with a rolling cache breakpoint that follows the conversation
 - Context compaction, automatic on a token threshold and on demand with `/compact`
+- Project instructions: `AGENTS.md` is loaded at the start, nested ones when the agent enters their subtree
 
 ## Get started
 
@@ -103,6 +104,25 @@ A processor then places up to three **rolling breakpoints** on the conversation,
 
 Caveat: the minimum cacheable prefix is model-dependent and Haiku 4.5 has the highest — 4096 tokens, against 1024 on Sonnet 5 and 512 on Opus 5. Below it nothing is cached and no error is raised; check `/usage`.
 
+## Project instructions
+
+`AGENTS.md` at the root of the project (or `CLAUDE.md`, or `CONTEXT.md` — first one found) is loaded into the system prompt before the first turn, so a rule like "never run the build directly" arrives before the agent can break it, not after.
+
+It lands as its own system block rather than inside the invariant one: editing the file rebuilds a few hundred tokens instead of the 12,728-character cached prefix. The file is re-read when its mtime or size changes, so an edit takes effect on the next turn without restarting the CLI — measured: the block's hash changed and the agent quoted the new rule.
+
+Nested files are Mastra's `AgentsMDInjector`: when a tool touches a path, it walks up to the nearest instruction file and injects it as a `system-reminder`, once per file. That covers `packages/api/AGENTS.md` applying only inside `packages/api`. Two things are excluded from it — the project's own file, already in the system prompt, and any instruction file *above* the project, which the upward walk would otherwise pull in from your home directory.
+
+Wiring it takes one thing that is invisible when you get it wrong: **the order of the input processors**. The injector reads the step's tool calls from `messageList.get.response`, and the observational-memory processor puts its own `data-om-status` message in that bucket, leaving the tool results in `get.all`. By default Mastra runs every memory processor first — `resolveInputProcessors` returns `[...memoryProcessors, ...configuredProcessors]` — so an injector left in the default position never fires, with no error and no reminder. Measured, same run and same question:
+
+| position | `response` bucket | injected |
+| --- | --- | --- |
+| after the memory processors (default) | `assistant: data-om-status` | no |
+| before them | `assistant: tool-invocation:result, workspace-metadata` | yes |
+
+So `agents/kira-code.ts` lists the memory processors explicitly, after this one. That is the supported way round it: `memory.getInputProcessors()` skips any processor whose id is already configured, so nothing is registered twice. Caching and compaction were re-measured under the new order and are unchanged (`cacheRead 15,689`, `noCache 3`, `/compact` still folds the window down to zero messages).
+
+`KIRA_INSTRUCTIONS=off` disables both halves. Instruction files are executable text from the checkout, and a branch under review is not always trusted.
+
 ## Context compaction
 
 Long threads outgrow the context window. Observational memory folds older messages into an observation log and drops them from the request: the thread continues, the raw history stays in the database, and what the model sees is a summary instead of the transcript.
@@ -154,6 +174,8 @@ Hiding the shell is cache-safe because the workspace registers the sandbox tools
 - `src/mastra/context.ts` — compaction thresholds from the model's context window
 - `src/mastra/context-state.ts` — what the thread occupies, as the model sees it
 - `src/mastra/prompts/system.ts` — the invariant system prompt plus its cache breakpoint
+- `src/mastra/prompts/project-instructions.ts` — the project's AGENTS.md, and what the injector must skip
+- `src/mastra/processors/nested-instructions.ts` — AGENTS.md of the subtree being worked on
 - `src/mastra/cache.ts` — prompt-cache setting and provider options
 - `src/mastra/processors/session-context.ts` — volatile session facts as a state signal
 - `src/mastra/processors/prompt-cache.ts` — rolling cache breakpoints

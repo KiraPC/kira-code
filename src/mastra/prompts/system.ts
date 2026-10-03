@@ -2,6 +2,7 @@ import { buildBasePrompt } from '@mastra/core/coding-agent';
 import type { CoreSystemMessage } from '@mastra/core/llm';
 import type { RequestContext } from '@mastra/core/request-context';
 import { PLATFORM, PROJECT_DIR, PROJECT_NAME } from '../config';
+import { projectInstructions } from './project-instructions';
 
 /**
  * kira-code specific rules layered on top of the base coding-agent prompt.
@@ -89,12 +90,17 @@ const STABLE_PROMPT = stripVolatileLines(
 );
 
 /**
- * Instructions as a single system message.
+ * The instructions, as system messages.
  *
- * The cache breakpoint is not attached here: Mastra appends more system blocks
- * after this one, and a marker here would leave them outside the cached span.
- * `processors/prompt-cache.ts` marks the last system block instead.
+ * The first block is the invariant one and carries the cache breakpoint (placed
+ * by `processors/prompt-cache.ts`, not here). The project's AGENTS.md follows as
+ * its own block, so editing it rebuilds a few hundred tokens instead of the
+ * whole cached prefix.
  */
 export function buildInstructions(_args: { requestContext?: RequestContext } = {}): CoreSystemMessage[] {
-  return [{ role: 'system', content: STABLE_PROMPT }];
+  const project = projectInstructions();
+
+  return project
+    ? [{ role: 'system', content: STABLE_PROMPT }, project]
+    : [{ role: 'system', content: STABLE_PROMPT }];
 }
