@@ -32,16 +32,29 @@ const WRITE_TOOLS = new Set<string>([
 ]);
 
 /**
- * Tools plan mode refuses outright — no path can make them acceptable there.
+ * The only tools plan mode may use to change anything, and only under the
+ * plans directory: it has to be able to write the plan it submits.
  *
- * They are blocked in the hook rather than removed from the toolset on
- * purpose: tools are rendered before the system prompt, so a per-mode toolset
- * would change the very front of the prompt and throw away the whole prompt
- * cache on every /mode switch. Same restriction, a stable prefix.
+ * An allowlist rather than a blocklist on purpose — a tool added later is
+ * refused by default instead of being permitted by omission.
+ *
+ * The sandbox tools are not listed here because they are not even exposed in
+ * plan mode (see `enabled` below). They sit at the end of the workspace's tool
+ * order, so removing them trims a suffix and leaves the cacheable prefix of
+ * the tool block untouched.
  */
-const PLAN_BLOCKED_TOOLS = new Set<string>([
-  WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND,
+/** Everything that can change the project, whatever the path. */
+const MUTATING_TOOLS = new Set<string>([
+  WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE,
+  WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE,
+  WORKSPACE_TOOLS.FILESYSTEM.AST_EDIT,
   WORKSPACE_TOOLS.FILESYSTEM.DELETE,
+  WORKSPACE_TOOLS.FILESYSTEM.MKDIR,
+]);
+
+const PLAN_ALLOWED_WRITE_TOOLS = new Set<string>([
+  WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE,
+  WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE,
 ]);
 
 const PLAN_MODE_REFUSAL = `Plan mode does not modify the project. Write the plan to a file under ${PLANS_DIR}/ and call submit_plan instead. The user switches to build mode by approving it.`;
@@ -134,24 +147,17 @@ export const workspace = new Workspace({
           ?.requestContext;
         const planMode = inPlanMode(requestContext);
 
-        if (planMode && PLAN_BLOCKED_TOOLS.has(workspaceToolName)) {
-          return { proceed: false, output: PLAN_MODE_REFUSAL };
-        }
-
         const path = (input as { path?: unknown } | undefined)?.path;
 
-        if (planMode && workspaceToolName === WORKSPACE_TOOLS.FILESYSTEM.MKDIR && !isPlanFile(path)) {
-          return { proceed: false, output: PLAN_MODE_REFUSAL };
+        if (planMode && MUTATING_TOOLS.has(workspaceToolName)) {
+          const allowed = PLAN_ALLOWED_WRITE_TOOLS.has(workspaceToolName) && isPlanFile(path);
+          if (!allowed) return { proceed: false, output: PLAN_MODE_REFUSAL };
         }
 
         if (!WRITE_TOOLS.has(workspaceToolName)) return;
 
         const absolute = toAbsolute(path);
         if (!absolute) return;
-
-        if (planMode && !isPlanFile(path)) {
-          return { proceed: false, output: PLAN_MODE_REFUSAL };
-        }
 
         // A file that doesn't exist yet cannot have been read.
         const currentMtime = modifiedAt(absolute);
@@ -198,10 +204,20 @@ export const workspace = new Workspace({
       name: 'delete_file',
       requireApproval: true,
     },
+    // Not exposed at all in plan mode. These three are the last tools the
+    // workspace registers, so dropping them trims the end of the tool block
+    // and the cached prefix in front of it still matches.
     [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: {
       name: 'bash',
       maxOutputTokens: 5000,
+      enabled: ({ requestContext }) => !inPlanMode(requestContext),
       requireApproval: ({ args }) => !isReadOnlyCommand(args?.command),
+    },
+    [WORKSPACE_TOOLS.SANDBOX.GET_PROCESS_OUTPUT]: {
+      enabled: ({ requestContext }) => !inPlanMode(requestContext),
+    },
+    [WORKSPACE_TOOLS.SANDBOX.KILL_PROCESS]: {
+      enabled: ({ requestContext }) => !inPlanMode(requestContext),
     },
   },
 });

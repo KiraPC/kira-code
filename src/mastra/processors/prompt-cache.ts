@@ -1,4 +1,4 @@
-import type { ProcessLLMRequestArgs, Processor } from '@mastra/core/processors';
+import type { ProcessInputStepArgs, ProcessLLMRequestArgs, Processor } from '@mastra/core/processors';
 import { cacheControlOptions, isAnthropicModel, resolveCacheSetting } from '../cache';
 
 /**
@@ -22,10 +22,44 @@ import { cacheControlOptions, isAnthropicModel, resolveCacheSetting } from '../c
  * outbound request only and are never persisted to the message list, memory or
  * history. Cache markers are a property of one call, not of the conversation.
  */
-const MAX_MESSAGE_BREAKPOINTS = 3;
+const MAX_MESSAGE_BREAKPOINTS = 2;
 
 /** Kept under the API's 20-block lookback, with room for the next turn's blocks. */
-const MAX_BLOCKS_BETWEEN_BREAKPOINTS = 15;
+const MAX_BLOCKS_BETWEEN_BREAKPOINTS = 12;
+
+/**
+ * The tool the tool-block breakpoint goes on.
+ *
+ * Tools render before everything else, and the workspace registers them in a
+ * fixed order that ends with the sandbox tools and lsp_inspect. `bash` and its
+ * two siblings disappear in plan mode, so the marker has to sit before them —
+ * on the last tool that is present in every mode — or the span would change
+ * with the mode and never be read back.
+ */
+const TOOL_BREAKPOINT_PREFERRED = 'mastra_workspace_index';
+
+/** Tools registered after the preferred one; never valid as the marker. */
+const TOOLS_AFTER_BREAKPOINT = [
+  'bash',
+  'mastra_workspace_execute_command',
+  'mastra_workspace_get_process_output',
+  'mastra_workspace_kill_process',
+  'lsp_inspect',
+  'mastra_workspace_lsp_inspect',
+];
+
+function chooseToolBreakpoint(names: string[]): string | undefined {
+  if (names.includes(TOOL_BREAKPOINT_PREFERRED)) return TOOL_BREAKPOINT_PREFERRED;
+
+  // Fallback for a workspace without BM25: the last tool that still precedes
+  // the mode-dependent ones.
+  for (let i = names.length - 1; i >= 0; i--) {
+    const name = names[i];
+    if (name && !TOOLS_AFTER_BREAKPOINT.includes(name)) return name;
+  }
+
+  return undefined;
+}
 
 type PromptMessage = ProcessLLMRequestArgs['prompt'][number];
 
@@ -63,6 +97,39 @@ function chooseBreakpoints(prompt: ProcessLLMRequestArgs['prompt']): number[] {
 
 export const promptCacheProcessor = {
   id: 'prompt-cache',
+
+  /**
+   * Marks the tool block so it survives a mode switch.
+   *
+   * The workspace tool config has no `providerOptions`, so the marker is
+   * attached here instead — `processInputStep` is the documented place to
+   * read and replace the step's tools.
+   */
+  processInputStep({ tools, model, requestContext }: ProcessInputStepArgs) {
+    const providerOptions = cacheControlOptions(resolveCacheSetting(requestContext));
+    if (!providerOptions) return;
+    if (!isAnthropicModel((model as { modelId?: unknown } | undefined)?.modelId)) return;
+
+    const names = Object.keys(tools ?? {});
+    const target = chooseToolBreakpoint(names);
+
+    if (!target || !tools) {
+      if (process.env.KIRA_DEBUG) console.log('[cache] no tool to mark; tool block uncached');
+      return;
+    }
+
+    const existing = tools[target] as { providerOptions?: Record<string, unknown> };
+    if (process.env.KIRA_DEBUG) {
+      console.log(`[cache] tool breakpoint on ${target} (${names.length} tools)`);
+    }
+
+    return {
+      tools: {
+        ...tools,
+        [target]: { ...existing, providerOptions: { ...existing.providerOptions, ...providerOptions } },
+      },
+    };
+  },
 
   processLLMRequest({ prompt, model, requestContext }: ProcessLLMRequestArgs) {
     const providerOptions = cacheControlOptions(resolveCacheSetting(requestContext));

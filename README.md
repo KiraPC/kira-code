@@ -103,7 +103,9 @@ Caveat: the minimum cacheable prefix is model-dependent and Haiku 4.5 has the hi
 
 Filesystem tools are contained to `KIRA_PROJECT_DIR`. `bash` auto-runs a read-only allowlist (`git status/diff/log`, `ls`, `cat`, test and typecheck scripts) and asks for approval on everything else. Edits require reading the file first.
 
-In plan mode, shell commands, deletes, mkdir and any write outside `.kira/plans/` are refused with a message telling the agent to submit a plan instead. The refusal lives in a workspace hook rather than in a per-mode tool set, because tools are rendered before the system prompt and a changing tool set would throw away the prompt cache on every mode switch — same restriction, stable prefix.
+In plan mode the shell is **not exposed at all** — `bash` and the process tools are absent from the toolset, so the agent can't attempt them. The file-mutating tools stay visible (plan mode has to write its own plan) and are gated by a workspace hook with an allowlist: only `write_file` and `edit_file`, only under `.kira/plans/`. Anything else is refused, including tools added later, which are denied by default rather than permitted by omission.
+
+Hiding the shell is cache-safe because the workspace registers the sandbox tools last, so dropping them trims the end of the tool block and leaves the cached prefix in front of it intact. Measured across a `/mode` switch: 7,823 tokens read from cache instead of a full rewrite.
 
 `LocalSandbox` provides no OS-level isolation. Point kira-code at a repo you can afford to have modified, review approvals, and don't expose the dev server unauthenticated.
 

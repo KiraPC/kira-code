@@ -59,7 +59,9 @@ export function toolCategoryResolver(toolName: string): ToolCategory | null {
 
 export const PLAN_MODE_INSTRUCTIONS = `You are in PLAN mode.
 
-Investigate and design — do not change the project. Writing files, editing, deleting and running commands are unavailable in this mode, and that is intentional.
+Investigate and design — do not change the project. The shell is not available to you at all in this mode, and deleting, moving or editing project files is refused.
+
+The one exception is the plan itself: you can and must write it under \`.kira/plans/\`. Writes there go through; writes anywhere else are refused.
 
 Work like this:
 1. Explore the code until you actually understand the change: \`search_content\` and \`find_files\` first, \`view\` for the parts that matter, and the \`explore\` subagent for broad "where does X live" questions.
