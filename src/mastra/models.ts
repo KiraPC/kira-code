@@ -7,16 +7,26 @@ import { getControllerContext } from './controller-context';
  * Every role resolves its model at request time, so the same code runs on any
  * provider of the Mastra model router (https://mastra.ai/models).
  */
-export type ModelRole = 'main' | 'fast' | 'subagent' | 'memory';
+export type ModelRole = 'main' | 'fast' | 'subagent' | 'memory' | 'reflect';
 
 /** Cheap default everywhere — development and tests run on Haiku. */
 const FALLBACK_MODEL = 'anthropic/claude-haiku-4-5';
+
+/**
+ * The one role that does not default to Haiku.
+ *
+ * Reflection rewrites the entire observation log, and whatever it drops is
+ * gone — unlike an observation, which later turns can correct. It also runs
+ * rarely, so a stronger model here costs very little.
+ */
+const REFLECT_FALLBACK_MODEL = 'anthropic/claude-sonnet-5';
 
 const ROLE_ENV_VAR: Record<ModelRole, string> = {
   main: 'KIRA_MODEL',
   fast: 'KIRA_FAST_MODEL',
   subagent: 'KIRA_SUBAGENT_MODEL',
   memory: 'KIRA_MEMORY_MODEL',
+  reflect: 'KIRA_REFLECT_MODEL',
 };
 
 /** Request context key that overrides each role for a single run. */
@@ -25,6 +35,7 @@ const ROLE_CONTEXT_KEY: Record<ModelRole, string> = {
   fast: 'model',
   subagent: 'subagentModel',
   memory: 'memoryModel',
+  reflect: 'reflectModel',
 };
 
 export const kiraRequestContextSchema = z.object({
@@ -39,7 +50,11 @@ export const kiraRequestContextSchema = z.object({
   memoryModel: z
     .string()
     .optional()
-    .describe('Model used for observational memory and thread titles.'),
+    .describe('Model that observes the conversation, and generates thread titles.'),
+  reflectModel: z
+    .string()
+    .optional()
+    .describe('Model that condenses the observation log. Defaults to a stronger model.'),
   cacheTtl: z
     .enum(['off', '5m', '1h'])
     .optional()
@@ -50,7 +65,10 @@ export type KiraRequestContext = z.infer<typeof kiraRequestContextSchema>;
 
 /** The configured default for a role, ignoring any per-request override. */
 export function defaultModel(role: ModelRole): string {
-  return process.env[ROLE_ENV_VAR[role]]?.trim() || FALLBACK_MODEL;
+  const configured = process.env[ROLE_ENV_VAR[role]]?.trim();
+  if (configured) return configured;
+
+  return role === 'reflect' ? REFLECT_FALLBACK_MODEL : FALLBACK_MODEL;
 }
 
 /**

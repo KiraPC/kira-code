@@ -1,7 +1,7 @@
 import { createCodingAgent } from '@mastra/core/coding-agent';
 import { askUserTool, submitPlanTool, webFetchTool, webSearchTool } from '@mastra/core/tools';
-import { Memory } from '@mastra/memory';
 import { PROJECT_NAME } from '../config';
+import { memory } from '../memory';
 import { kiraRequestContextSchema, resolveModel } from '../models';
 import { promptCacheProcessor } from '../processors/prompt-cache';
 import { sessionContextProcessor } from '../processors/session-context';
@@ -29,17 +29,7 @@ export const kiraCode = createCodingAgent({
   requestContextSchema: kiraRequestContextSchema,
   instructions: buildInstructions,
   workspace,
-  memory: new Memory({
-    options: {
-      generateTitle: {
-        model: ({ requestContext }) => resolveModel('memory', requestContext),
-      },
-      workingMemory: { enabled: true, scope: 'resource' },
-      observationalMemory: {
-        model: ({ requestContext }) => resolveModel('memory', requestContext),
-      },
-    },
-  }),
+  memory,
   agents: { explore: exploreAgent },
   // session-context delivers the volatile session facts the system prompt no
   // longer carries; prompt-cache places the rolling cache breakpoints.

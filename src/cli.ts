@@ -18,8 +18,10 @@ import type { Session } from '@mastra/core/agent-controller';
 import { RequestContext } from '@mastra/core/request-context';
 import { defaultCacheSetting, isCacheSetting, type CacheSetting } from './mastra/cache';
 import { PROJECT_DIR } from './mastra/config';
+import { describeContextState, readContextState, type ContextState } from './mastra/context-state';
 import { controller } from './mastra/controller';
 import { mastra } from './mastra/index';
+import { memory } from './mastra/memory';
 import { defaultModel } from './mastra/models';
 
 const color = {
@@ -56,6 +58,9 @@ const printed = new Map<string, string>();
 /** Resolves when the active run reaches a terminal state. */
 let runFinished: (() => void) | null = null;
 
+/** Last context notice printed, so a stable window doesn't repeat every step. */
+let lastContextNotice = '';
+
 /** The edit policy the user chose; restored when leaving plan mode. */
 let editPolicy: 'allow' | 'ask' | 'deny' = 'ask';
 
@@ -81,6 +86,70 @@ async function applyModePermissions(session: Session): Promise<void> {
     category: 'edit',
     policy: session.mode.get() === 'plan' ? 'allow' : editPolicy,
   });
+}
+
+/** Reads the live context state for the session's thread. */
+async function readContext(session: Session): Promise<ContextState | null> {
+  const threadId = session.thread.getId();
+  if (!threadId) return null;
+
+  return readContextState(threadId, session.identity.getResourceId());
+}
+
+/**
+ * Runs an observation with the message threshold out of the way.
+ *
+ * `observe()` is documented as a manual trigger, but it still returns early
+ * unless the unobserved messages already exceed the automatic threshold — which
+ * makes it useless as a "compact now" command. The documented way around it,
+ * `updateRecordConfig({ observation: { messageTokens } })`, is silently ignored
+ * for any value at or below `bufferTokens` (a fifth of the threshold, 12k on
+ * Haiku), so it cannot force a pass on a thread smaller than that either.
+ *
+ * What is left is the engine's own threshold, lowered for the duration of the
+ * call and restored right after. The engine serialises observations behind a
+ * lock, and the CLI only accepts a command while no run is in flight, so no
+ * other pass can see the lowered value.
+ */
+async function withForcedObservation<T>(om: unknown, run: () => Promise<T>): Promise<T> {
+  const config = (om as { observationConfig?: { messageTokens?: unknown } }).observationConfig;
+  const configured = config?.messageTokens;
+
+  if (config) config.messageTokens = 1;
+  try {
+    return await run();
+  } finally {
+    if (config) config.messageTokens = configured;
+  }
+}
+
+async function compact(session: Session, instructions: string): Promise<void> {
+  const threadId = session.thread.getId();
+  const om = await memory.omEngine;
+
+  if (!threadId || !om) {
+    console.log(color.red('nothing to compact: no thread, or observational memory is off'));
+    return;
+  }
+
+  const before = await readContext(session);
+  const resourceId = session.identity.getResourceId();
+
+  console.log(color.dim(`compacting${instructions ? ` — ${instructions}` : ''}…`));
+
+  const result = await withForcedObservation(om, () =>
+    om.observe({ threadId, resourceId, trigger: 'manual' }),
+  );
+  if (instructions) await om.reflect(threadId, resourceId, instructions);
+
+  const after = await readContext(session);
+
+  if (before) console.log(color.dim(`  before  ${describeContextState(before)}`));
+  if (after) console.log(color.dim(`  after   ${describeContextState(after)}`));
+
+  if (!result.observed && !instructions) {
+    console.log(color.dim('  nothing was observed — too little new history to be worth a pass'));
+  }
 }
 
 /**
@@ -301,6 +370,31 @@ function subscribe(session: Session): () => void {
         enqueue(() => handleSuspension(session, event));
         break;
 
+      // Observational memory reports its two windows on every step. Without
+      // this the context silently compacts itself and you never see it happen.
+      case 'om_status': {
+        const active = event.windows?.active;
+        const buffered = event.windows?.buffered?.observations;
+        const messages = active?.messages;
+        if (!messages) break;
+
+        const pending = buffered?.projectedMessageRemoval ?? 0;
+        const key = `${Math.round(messages.tokens / 1000)}-${Math.round(pending / 1000)}`;
+        if (key === lastContextNotice) break;
+        lastContextNotice = key;
+
+        if (pending > 0) {
+          console.log(
+            color.dim(
+              `\n[context] ${messages.tokens}/${messages.threshold} tokens — ${pending} queued for compaction`,
+            ),
+          );
+        } else if (messages.tokens > messages.threshold * 0.8) {
+          console.log(color.dim(`\n[context] ${messages.tokens}/${messages.threshold} tokens`));
+        }
+        break;
+      }
+
       case 'mode_changed':
         console.log(color.cyan(`\n[mode: ${event.modeId}]`));
         enqueue(() => applyModePermissions(session));
@@ -336,6 +430,8 @@ Commands:
   /mode [plan|build|fast]   show or switch mode
   /model <provider/model>   switch the model for the current mode
   /cache [off|5m|1h]        show or set the prompt-cache TTL
+  /context                  how much of the context window is in use
+  /compact [instructions]   compact now: fold messages into observations
   /perm <category> <policy> set a permission (read|edit|execute|other × allow|ask|deny)
   /perms                    show current permission rules
   /new [title]              start a new thread
@@ -419,6 +515,16 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
     case 'switch':
       if (!arg) console.log('usage: /switch <threadId>');
       else await session.thread.switch({ threadId: arg });
+      return true;
+
+    case 'context': {
+      const state = await readContext(session);
+      console.log(state ? describeContextState(state) : 'no thread yet');
+      return true;
+    }
+
+    case 'compact':
+      await compact(session, arg);
       return true;
 
     case 'usage':

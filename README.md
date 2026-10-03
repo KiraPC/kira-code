@@ -17,6 +17,7 @@ Two front ends over the same agent, sharing threads and memory: a **terminal CLI
 - Reusable skills from `skills/` (the [agentskills.io](https://agentskills.io) format)
 - Multi-model: any provider of the [Mastra model router](https://mastra.ai/models), switchable at runtime
 - Prompt caching on Anthropic models, with a rolling cache breakpoint that follows the conversation
+- Context compaction, automatic on a token threshold and on demand with `/compact`
 
 ## Get started
 
@@ -58,6 +59,8 @@ Then open [http://localhost:4111](http://localhost:4111) and pick the **kira-cod
 /new [title]              start a new thread
 /threads                  list stored threads
 /switch <threadId>        switch to a thread
+/context                  how much of the context window the thread occupies
+/compact [instructions]   compact the context now, optionally guided
 /usage                    token usage for this thread
 /abort                    stop the active run
 /help                     command list
@@ -77,11 +80,12 @@ Nothing is hardcoded. Each role resolves its model at request time and defaults 
 | `KIRA_MODEL` | the main agent |
 | `KIRA_FAST_MODEL` | the CLI's `fast` mode |
 | `KIRA_SUBAGENT_MODEL` | `explore` and future subagents |
-| `KIRA_MEMORY_MODEL` | observational memory and thread titles |
+| `KIRA_MEMORY_MODEL` | observing the conversation, and thread titles |
+| `KIRA_REFLECT_MODEL` | condensing the observation log — defaults to `anthropic/claude-sonnet-5` |
 
 Set them to any `provider/model` id — `anthropic/claude-sonnet-5`, `openai/gpt-5-mini`, `google/...`, `xai/...` — as long as the matching API key is set.
 
-At runtime you can override without restarting: `/model` in the CLI (persisted per mode on the thread), or the `model` / `subagentModel` / `memoryModel` fields in Studio's **request context** panel.
+At runtime you can override without restarting: `/model` in the CLI (persisted per mode on the thread), or the `model` / `subagentModel` / `memoryModel` / `reflectModel` fields in Studio's **request context** panel.
 
 Verify a model id before using it:
 
@@ -98,6 +102,26 @@ A processor then places up to three **rolling breakpoints** on the conversation,
 `/cache off|5m|1h` (default `KIRA_CACHE_TTL`, else `5m`). `off` is there to measure the difference: on a two-question thread the second request went from **15,507 uncached tokens to 6**.
 
 Caveat: the minimum cacheable prefix is model-dependent and Haiku 4.5 has the highest — 4096 tokens, against 1024 on Sonnet 5 and 512 on Opus 5. Below it nothing is cached and no error is raised; check `/usage`.
+
+## Context compaction
+
+Long threads outgrow the context window. Observational memory folds older messages into an observation log and drops them from the request: the thread continues, the raw history stays in the database, and what the model sees is a summary instead of the transcript.
+
+Two thresholds drive it, both derived from the main model's context window rather than fixed — 30% for messages, 20% for observations, floored at Mastra's 30k/40k and capped at 150k/100k, so 60,000 / 40,000 on Haiku. `KIRA_OBSERVE_TOKENS` and `KIRA_REFLECT_TOKENS` override them.
+
+```
+/context                  messages and observations against their thresholds
+/compact                  observe now — messages become observations
+/compact <instructions>   observe, then rewrite the log with that guidance
+```
+
+Measured on a filled thread: 7 messages and 3,834 tokens went to 0 messages and 349 tokens of observations, and the facts stated before the compaction were still answered afterwards without a single file read. A guided `/compact tieni solo le regole di progetto` then took the log from 349 to 116 tokens, dropping the file summaries and keeping the rules — content changed, not only size.
+
+The two steps run on different models on purpose. Observing is frequent and recoverable; a reflection rewrites the whole log at once, so `KIRA_REFLECT_MODEL` defaults to Sonnet 5 while everything else stays on Haiku.
+
+Compaction and caching interact but do not fight: compaction rewrites the messages, which sit *after* the system and tool breakpoints. Measured on the turn right after a `/compact`, the 14,086-token prefix still came from cache; only the rolling message breakpoints move, and since the history shrank, the cache write shrank with it (4,296 → 2,739 tokens).
+
+`observe()` returns early below its own threshold even when called manually, and per-record threshold overrides are ignored below `bufferTokens` — so `/compact` lowers the engine threshold for the duration of the call and restores it right after. That is a private field, and the one thing here that could break on a Mastra upgrade; the automatic cycle would keep working.
 
 ## Safety
 
@@ -126,6 +150,9 @@ Hiding the shell is cache-safe because the workspace registers the sandbox tools
 - `src/mastra/agents/explore-agent.ts` — the read-only search subagent
 - `src/mastra/workspace.ts` — tool names, approval and mode policy, LSP, search
 - `src/mastra/models.ts` — model roles, defaults, runtime overrides
+- `src/mastra/memory.ts` — memory instance, observation and reflection models
+- `src/mastra/context.ts` — compaction thresholds from the model's context window
+- `src/mastra/context-state.ts` — what the thread occupies, as the model sees it
 - `src/mastra/prompts/system.ts` — the invariant system prompt plus its cache breakpoint
 - `src/mastra/cache.ts` — prompt-cache setting and provider options
 - `src/mastra/processors/session-context.ts` — volatile session facts as a state signal
