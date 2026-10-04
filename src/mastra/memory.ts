@@ -1,5 +1,5 @@
 import { Memory } from '@mastra/memory';
-import { contextBudget } from './context';
+import { contextBudget } from './context-budget';
 import { resolveModel } from './models';
 import { storage } from './storage';
 

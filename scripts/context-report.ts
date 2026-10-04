@@ -9,7 +9,7 @@
  *   npx tsx scripts/context-report.ts <threadId> [label]
  */
 import '../src/cli-bootstrap';
-import { readContextState } from '../src/mastra/context-state';
+import { readContextState } from '../src/mastra/context-usage';
 import { contextTokenBudget, memory } from '../src/mastra/memory';
 import { defaultModel } from '../src/mastra/models';
 
