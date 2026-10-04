@@ -12,8 +12,6 @@
 import './cli-bootstrap';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createInterface } from 'node:readline/promises';
-import { stdin, stdout } from 'node:process';
 import type { Session } from '@mastra/core/agent-controller';
 import { RequestContext } from '@mastra/core/request-context';
 import { defaultCacheSetting, isCacheSetting, type CacheSetting } from './mastra/cache';
@@ -25,46 +23,41 @@ import { declaredServers, disconnectMcp, mcpStatus, projectConfigPath, projectTr
 import { memory } from './mastra/memory';
 import { defaultModel } from './mastra/models';
 import { listSkills } from './mastra/skills';
+import type { Renderer } from './session/events';
+import { subscribeSession } from './session/subscribe';
+import { color } from './ui/color';
+import { createIo, type Io } from './ui/io';
+import { createPlainRenderer } from './ui/plain-renderer';
+import { approvalContext } from './ui/tool-view';
 
-const color = {
-  dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
-  bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
-  cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
-  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
-  yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
-};
-
-const rl = createInterface({ input: stdin, output: stdout });
-
-/** Input is gone once stdin closes (EOF, Ctrl-D, or a piped script ending). */
-let inputClosed = false;
-rl.on('close', () => {
-  inputClosed = true;
-});
+/**
+ * The terminal, behind an interface: Ink when there is a screen to draw on, and
+ * plain lines when stdout is a pipe. Assigned in `main()` before anything reads
+ * or writes.
+ */
+let io!: Io;
 
 /** Prompt for a line, or return null when there is no more input. */
-async function ask(prompt: string): Promise<string | null> {
-  if (inputClosed) return null;
-
-  try {
-    return await rl.question(prompt);
-  } catch {
-    inputClosed = true;
-    return null;
-  }
+function ask(prompt: string): Promise<string | null> {
+  return io.ask(prompt);
 }
 
-/** Text already printed per assistant message, so updates render as deltas. */
-const printed = new Map<string, string>();
+/** A finished line of output. */
+function say(text = ''): void {
+  io.line(text);
+}
+
 /** Resolves when the active run reaches a terminal state. */
 let runFinished: (() => void) | null = null;
 
+/**
+ * Calls whose diff was already shown while asking about them, so the renderer
+ * does not repeat it when they finish.
+ */
+const shownAtApproval = new Set<string>();
+
 /** A turn a command wants sent on its behalf — see `/skill`. */
 let queuedPrompt: string | null = null;
-
-/** Last context notice printed, so a stable window doesn't repeat every step. */
-let lastContextNotice = '';
 
 /** The edit policy the user chose; restored when leaving plan mode. */
 let editPolicy: 'allow' | 'ask' | 'deny' = 'ask';
@@ -133,14 +126,14 @@ async function compact(session: Session, instructions: string): Promise<void> {
   const om = await memory.omEngine;
 
   if (!threadId || !om) {
-    console.log(color.red('nothing to compact: no thread, or observational memory is off'));
+    say(color.red('nothing to compact: no thread, or observational memory is off'));
     return;
   }
 
   const before = await readContext(session);
   const resourceId = session.identity.getResourceId();
 
-  console.log(color.dim(`compacting${instructions ? ` — ${instructions}` : ''}…`));
+  say(color.dim(`compacting${instructions ? ` — ${instructions}` : ''}…`));
 
   const result = await withForcedObservation(om, () =>
     om.observe({ threadId, resourceId, trigger: 'manual' }),
@@ -149,60 +142,12 @@ async function compact(session: Session, instructions: string): Promise<void> {
 
   const after = await readContext(session);
 
-  if (before) console.log(color.dim(`  before  ${describeContextState(before)}`));
-  if (after) console.log(color.dim(`  after   ${describeContextState(after)}`));
+  if (before) say(color.dim(`  before  ${describeContextState(before)}`));
+  if (after) say(color.dim(`  after   ${describeContextState(after)}`));
 
   if (!result.observed && !instructions) {
-    console.log(color.dim('  nothing was observed — too little new history to be worth a pass'));
+    say(color.dim('  nothing was observed — too little new history to be worth a pass'));
   }
-}
-
-/**
- * A suspended run is not a finished run: an interactive tool is waiting for an
- * answer and the run resumes once it gets one. Returning to the main prompt
- * here would put two readers on stdin, and the main loop would swallow the
- * answer meant for the suspension.
- */
-function finishRunIfIdle(session: Session): void {
-  if (session.run.isRunning() || session.suspensions.hasPending()) return;
-  runFinished?.();
-}
-
-function messageText(message: { id: string; role: string; content: { parts?: unknown[] } }): string {
-  const parts = message.content?.parts ?? [];
-  return parts
-    .filter((part): part is { type: 'text'; text: string } => {
-      return (
-        typeof part === 'object' &&
-        part !== null &&
-        (part as { type?: unknown }).type === 'text' &&
-        typeof (part as { text?: unknown }).text === 'string'
-      );
-    })
-    .map(part => part.text)
-    .join('');
-}
-
-function renderAssistantDelta(message: Parameters<typeof messageText>[0]): void {
-  if (message.role !== 'assistant') return;
-
-  const full = messageText(message);
-  const already = printed.get(message.id) ?? '';
-  if (full.length <= already.length) return;
-
-  stdout.write(full.slice(already.length));
-  printed.set(message.id, full);
-}
-
-function summarizeArgs(args: unknown): string {
-  if (args === null || args === undefined) return '';
-
-  const record = typeof args === 'object' ? (args as Record<string, unknown>) : {};
-  const interesting = record.command ?? record.path ?? record.pattern ?? record.prompt;
-  const text = typeof interesting === 'string' ? interesting : JSON.stringify(args);
-
-  const oneLine = (text ?? '').replace(/\s+/g, ' ').trim();
-  return oneLine.length > 100 ? `${oneLine.slice(0, 100)}…` : oneLine;
 }
 
 async function readPlan(path: unknown): Promise<string> {
@@ -219,47 +164,63 @@ async function handleApproval(
   session: Session,
   event: { toolCallId: string; toolName: string; args: unknown },
 ): Promise<void> {
-  stdout.write('\n');
-  const answer = (
-    (await ask(
-      color.yellow(
-        `⏸  ${event.toolName} wants to run: ${summarizeArgs(event.args)}\n   [y]es / [n]o / [a]lways this category: `,
-      ),
-    )) ?? 'n'
-  )
-    .trim()
-    .toLowerCase();
+  io.write('\n');
 
+  // The file as it still is: nothing has been written yet, so this is the side
+  // of the diff that is about to disappear.
+  const path = (event.args as { path?: unknown } | undefined)?.path;
+  let previous: string | undefined;
+  if (typeof path === 'string') {
+    try {
+      previous = await readFile(resolve(PROJECT_DIR, path), 'utf8');
+    } catch {
+      previous = undefined;
+    }
+  }
+
+  const context = approvalContext({ name: event.toolName, args: event.args, previous });
+  for (const line of context) say(line);
+  if (context.length > 0) shownAtApproval.add(event.toolCallId);
+
+  // The question goes to the selection, not to the log: printed above, it ends
+  // up separated from its own answers by whatever the live area is drawing —
+  // the task checklist, most of the time.
   const decision =
-    answer === 'y' || answer === 'yes'
-      ? 'approve'
-      : answer === 'a' || answer === 'always'
-        ? 'always_allow_category'
-        : 'decline';
+    (await io.select(color.yellow(`${event.toolName} wants to run — approve?`), [
+      { value: 'approve', label: 'yes', key: 'y' },
+      { value: 'decline', label: 'no', key: 'n' },
+      { value: 'always_allow_category', label: 'always this category', key: 'a' },
+    ])) ?? 'decline';
 
-  session.respondToToolApproval({ toolCallId: event.toolCallId, decision });
-  console.log(color.dim(`   → ${decision}`));
+  session.respondToToolApproval({
+    toolCallId: event.toolCallId,
+    decision: decision as 'approve' | 'decline' | 'always_allow_category',
+  });
+  if (!io.interactive) say(color.dim(`   → ${decision}`));
 }
 
 async function handleSuspension(
   session: Session,
   event: { toolCallId: string; toolName: string; suspendPayload: unknown },
 ): Promise<void> {
-  stdout.write('\n');
+  io.write('\n');
 
   if (event.toolName === 'submit_plan') {
     const payload = (event.suspendPayload ?? {}) as { path?: string };
-    console.log(color.cyan('── plan ──────────────────────────────'));
-    console.log(await readPlan(payload.path));
-    console.log(color.cyan('──────────────────────────────────────'));
+    say(color.cyan('── plan ──────────────────────────────'));
+    say(await readPlan(payload.path));
+    say(color.cyan('──────────────────────────────────────'));
 
-    const answer = ((await ask(color.yellow('Approve plan? [y]es / [n]o: '))) ?? 'n').trim().toLowerCase();
-    if (answer === 'y' || answer === 'yes') {
+    const answer = await io.select(color.yellow('Approve plan?'), [
+      { value: 'yes', label: 'yes', key: 'y' },
+      { value: 'no', label: 'no, with feedback', key: 'n' },
+    ]);
+    if (answer === 'yes') {
       await session.respondToToolSuspension({
         toolCallId: event.toolCallId,
         resumeData: { action: 'approved', path: payload.path },
       });
-      console.log(color.dim('   → approved, switching to build mode'));
+      say(color.dim('   → approved, switching to build mode'));
 
       // Upstream defect in @mastra/core 1.58.0: resumeToolCall() only clears
       // requireToolApproval for ask_user and request_access, so a resumed
@@ -290,13 +251,30 @@ async function handleSuspension(
   const options = payload.options ?? [];
   const multiSelect = payload.selectionMode === 'multi_select';
 
-  console.log(color.yellow(`? ${question}`));
+  // A single-choice question is a selection like any other; only multi-select
+  // still needs numbers typed, because picking several is not what a list does.
+  if (options.length > 0 && !multiSelect) {
+    const chosen = await io.select(
+      color.yellow(`? ${question}`),
+      options.map((option, index) => ({
+        value: option.label ?? String(index + 1),
+        label: option.label ?? String(index + 1),
+        hint: option.description ? color.dim(`— ${option.description}`) : undefined,
+        key: String(index + 1),
+      })),
+    );
+
+    await session.respondToToolSuspension({ toolCallId: event.toolCallId, resumeData: chosen ?? '' });
+    return;
+  }
+
+  say(color.yellow(`? ${question}`));
   options.forEach((option, index) => {
     const description = option.description ? color.dim(` — ${option.description}`) : '';
-    console.log(`  ${index + 1}) ${option.label ?? ''}${description}`);
+    say(`  ${index + 1}) ${option.label ?? ''}${description}`);
   });
   if (options.length > 0) {
-    console.log(color.dim(multiSelect ? '  pick numbers, comma separated' : '  pick a number, or type your own answer'));
+    say(color.dim('  pick numbers, comma separated'));
   }
 
   const raw = (await ask(color.yellow('> '))) ?? '';
@@ -318,115 +296,66 @@ async function handleSuspension(
   await session.respondToToolSuspension({ toolCallId: event.toolCallId, resumeData });
 }
 
-function subscribe(session: Session): () => void {
-  // Interactive prompts must not run inside the event listener: the listener is
-  // called synchronously from the run loop, and awaiting user input there would
-  // stall it. Queue them instead and drain one at a time.
-  let pending = Promise.resolve();
-  const enqueue = (task: () => Promise<void>) => {
-    pending = pending
-      .then(task)
-      .catch(error => {
-        console.error(color.red(`\n${error instanceof Error ? error.message : String(error)}`));
-      })
-      // A resume that never restarts the run would otherwise hang the prompt.
-      .then(() => finishRunIfIdle(session));
-  };
+/**
+ * The lines renderer, plus the footer's share of the same events.
+ *
+ * Both renderers get the lines; only an interactive one has somewhere to put a
+ * status that changes without a line being written, so `setStatus` is absent on
+ * the plain side and these calls simply do nothing there.
+ */
+function createRenderer(session: Session): Renderer {
+  const lines = createPlainRenderer(io, shownAtApproval);
 
-  return session.subscribe(event => {
-    // KIRA_DEBUG=1 prints the raw event stream: the fastest way to see a
-    // mismatch between what you answered and what the agent was told.
-    if (process.env.KIRA_DEBUG) {
-      const detail = JSON.stringify(event, (key, value) =>
-        key === 'message' ? undefined : value,
-      );
-      console.log(color.dim(`\n[event] ${detail?.slice(0, 400)}`));
-    }
+  return {
+    handle(event) {
+      lines.handle(event);
 
-    switch (event.type) {
-      case 'message_update':
-      case 'message_end':
-        renderAssistantDelta(event.message);
-        break;
-
-      case 'tool_start':
-        console.log(color.dim(`\n· ${event.toolName} ${summarizeArgs(event.args)}`));
-        break;
-
-      case 'tool_end': {
-        if (event.isError) {
-          console.log(color.red(`  ✗ ${summarizeArgs(event.result)}`));
+      switch (event.type) {
+        case 'mode':
+          io.setStatus?.({ mode: event.mode });
           break;
-        }
-        // Show what an interactive tool actually reported back, so a decision
-        // the model received can never silently disagree with what you typed.
-        const content = (event.result as { content?: unknown } | undefined)?.content;
-        if (typeof content === 'string' && content.startsWith('Plan ')) {
-          console.log(color.dim(`  ${content.split('\n')[0]}`));
-        }
-        break;
+
+        case 'model':
+          io.setStatus?.({ model: event.model });
+          break;
+
+        case 'context':
+          io.setStatus?.({ contextTokens: event.tokens, contextThreshold: event.threshold });
+          break;
+
+        case 'tasks':
+          io.setTasks?.(event.tasks);
+          break;
+
+        // Usage is cumulative and cheap to read, but reading it per token would
+        // be noise: a tool boundary is often enough to watch it climb.
+        case 'tool-end':
+          io.setStatus?.({ tokens: session.getTokenUsage().totalTokens });
+          break;
+
+        case 'run-end':
+          io.setStatus?.({
+            running: false,
+            startedAt: null,
+            tokens: session.getTokenUsage().totalTokens,
+          });
+          break;
+
+        default:
+          break;
       }
+    },
+  };
+}
 
-      case 'tool_approval_required':
-        enqueue(() => handleApproval(session, event));
-        break;
-
-      case 'tool_suspended':
-        enqueue(() => handleSuspension(session, event));
-        break;
-
-      // Observational memory reports its two windows on every step. Without
-      // this the context silently compacts itself and you never see it happen.
-      case 'om_status': {
-        const active = event.windows?.active;
-        const buffered = event.windows?.buffered?.observations;
-        const messages = active?.messages;
-        if (!messages) break;
-
-        const pending = buffered?.projectedMessageRemoval ?? 0;
-        const key = `${Math.round(messages.tokens / 1000)}-${Math.round(pending / 1000)}`;
-        if (key === lastContextNotice) break;
-        lastContextNotice = key;
-
-        if (pending > 0) {
-          console.log(
-            color.dim(
-              `\n[context] ${messages.tokens}/${messages.threshold} tokens — ${pending} queued for compaction`,
-            ),
-          );
-        } else if (messages.tokens > messages.threshold * 0.8) {
-          console.log(color.dim(`\n[context] ${messages.tokens}/${messages.threshold} tokens`));
-        }
-        break;
-      }
-
-      case 'mode_changed':
-        console.log(color.cyan(`\n[mode: ${event.modeId}]`));
-        enqueue(() => applyModePermissions(session));
-        break;
-
-      case 'model_changed':
-        console.log(color.cyan(`\n[model: ${event.modelId}]`));
-        break;
-
-      case 'error':
-        console.error(color.red(`\n✗ ${event.error?.message ?? event.error}`));
-        break;
-
-      case 'agent_end':
-        printed.clear();
-        stdout.write('\n');
-        if (event.reason && event.reason !== 'complete') {
-          console.log(color.dim(`[${event.reason}]`));
-        }
-        // Queued so it lands after any approval prompt still on screen;
-        // resolving here would put the main loop on stdin alongside it.
-        if (event.reason !== 'suspended') enqueue(async () => {});
-        break;
-
-      default:
-        break;
-    }
+function subscribe(session: Session): () => void {
+  return subscribeSession({
+    session,
+    renderer: createRenderer(session),
+    onApproval: event => handleApproval(session, event),
+    onSuspension: event => handleSuspension(session, event),
+    onModeChange: () => applyModePermissions(session),
+    onIdle: () => runFinished?.(),
   });
 }
 
@@ -451,6 +380,12 @@ Commands:
   /exit                     quit
 `;
 
+/**
+ * The command names, read out of HELP so completion cannot drift from the list
+ * the user is shown.
+ */
+const COMMANDS = [...HELP.matchAll(/^ {2}\/(\w+)/gm)].map(match => match[1] ?? '').filter(Boolean);
+
 async function runCommand(session: Session, line: string): Promise<boolean> {
   const [command, ...rest] = line.slice(1).trim().split(/\s+/);
   const arg = rest.join(' ');
@@ -461,23 +396,23 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
       return false;
 
     case 'help':
-      console.log(HELP);
+      say(HELP);
       return true;
 
     case 'mode':
-      if (!arg) console.log(`mode: ${session.mode.get()}`);
+      if (!arg) say(`mode: ${session.mode.get()}`);
       else await session.mode.switch({ modeId: arg });
       return true;
 
     case 'model':
-      if (!arg) console.log(`model: ${session.model.get() ?? defaultModel('main')}`);
+      if (!arg) say(`model: ${session.model.get() ?? defaultModel('main')}`);
       else await session.model.switch({ modelId: arg, scope: 'thread' });
       return true;
 
     case 'perm': {
       const [category, policy] = arg.split(/\s+/);
       if (!category || !policy) {
-        console.log('usage: /perm <read|edit|execute|other> <allow|ask|deny>');
+        say('usage: /perm <read|edit|execute|other> <allow|ask|deny>');
         return true;
       }
       if (category === 'edit') editPolicy = policy as typeof editPolicy;
@@ -485,35 +420,36 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
         category: category as 'read' | 'edit' | 'execute' | 'other',
         policy: policy as 'allow' | 'ask' | 'deny',
       });
-      console.log(color.dim(`${category} → ${policy}`));
+      say(color.dim(`${category} → ${policy}`));
       return true;
     }
 
     case 'cache':
       if (!arg) {
-        console.log(`cache: ${cacheSetting}`);
+        say(`cache: ${cacheSetting}`);
       } else if (isCacheSetting(arg)) {
         cacheSetting = arg;
-        console.log(color.dim(`cache → ${cacheSetting}`));
+        io.setStatus?.({ cache: cacheSetting });
+        say(color.dim(`cache → ${cacheSetting}`));
       } else {
-        console.log('usage: /cache <off|5m|1h>');
+        say('usage: /cache <off|5m|1h>');
       }
       return true;
 
     case 'perms':
-      console.log(JSON.stringify(session.permissions.getRules(), null, 2));
+      say(JSON.stringify(session.permissions.getRules(), null, 2));
       return true;
 
     case 'new': {
       const thread = await session.thread.create({ title: arg || undefined });
-      console.log(color.dim(`new thread ${thread.id}`));
+      say(color.dim(`new thread ${thread.id}`));
       return true;
     }
 
     case 'mcp': {
       if (arg === 'trust') {
         const result = trustProjectConfig();
-        console.log(
+        say(
           result.trusted
             ? color.green(`trusted ${projectConfigPath()} — its servers start from the next turn`)
             : color.red(`nothing to trust: ${result.reason}`),
@@ -522,13 +458,13 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
       }
 
       if (arg) {
-        console.log(color.dim('usage: /mcp [trust]'));
+        say(color.dim('usage: /mcp [trust]'));
         return true;
       }
 
       const servers = await mcpStatus();
       if (servers.length === 0) {
-        console.log(color.dim('no MCP servers configured'));
+        say(color.dim('no MCP servers configured'));
         return true;
       }
 
@@ -538,13 +474,13 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
           : server.active
             ? `${server.tools} tools`
             : color.yellow('not trusted');
-        console.log(`${server.name}  ${color.dim(`(${server.source}, ${server.category})`)}  ${state}`);
-        console.log(color.dim(`  ${server.transport}`));
-        if (server.error) console.log(color.dim(`  ${server.error}`));
+        say(`${server.name}  ${color.dim(`(${server.source}, ${server.category})`)}  ${state}`);
+        say(color.dim(`  ${server.transport}`));
+        if (server.error) say(color.dim(`  ${server.error}`));
       }
 
       if (servers.some(server => !server.active)) {
-        console.log(color.dim(`\nrun /mcp trust to enable the servers declared in ${projectConfigPath()}`));
+        say(color.dim(`\nrun /mcp trust to enable the servers declared in ${projectConfigPath()}`));
       }
       return true;
     }
@@ -552,15 +488,15 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
     case 'skills': {
       const skills = listSkills();
       if (skills.length === 0) {
-        console.log(color.dim('no skills found'));
+        say(color.dim('no skills found'));
         return true;
       }
 
       for (const skill of skills) {
         const flags = skill.userInvocable ? skill.source : `${skill.source}, not user-invocable`;
-        console.log(`${skill.name}  ${color.dim(`(${flags})`)}`);
-        if (skill.description) console.log(color.dim(`  ${skill.description}`));
-        if (skill.shadows) console.log(color.dim(`  hides ${skill.shadows}`));
+        say(`${skill.name}  ${color.dim(`(${flags})`)}`);
+        if (skill.description) say(color.dim(`  ${skill.description}`));
+        if (skill.shadows) say(color.dim(`  hides ${skill.shadows}`));
       }
       return true;
     }
@@ -570,7 +506,7 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
       const skills = listSkills();
 
       if (!name) {
-        console.log(color.dim('usage: /skill <name> [instructions]'));
+        say(color.dim('usage: /skill <name> [instructions]'));
         return true;
       }
 
@@ -578,13 +514,13 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
       // a line of output, not a model call that ends in "no such skill".
       const skill = skills.find(candidate => candidate.name === name);
       if (!skill) {
-        console.log(color.red(`no skill named "${name}"`));
-        console.log(color.dim(`available: ${skills.map(candidate => candidate.name).join(', ') || 'none'}`));
+        say(color.red(`no skill named "${name}"`));
+        say(color.dim(`available: ${skills.map(candidate => candidate.name).join(', ') || 'none'}`));
         return true;
       }
 
       if (!skill.userInvocable) {
-        console.log(color.red(`"${name}" is marked user-invocable: false — the agent loads it on its own`));
+        say(color.red(`"${name}" is marked user-invocable: false — the agent loads it on its own`));
         return true;
       }
 
@@ -597,19 +533,19 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
       const current = session.thread.getId();
       for (const thread of threads.slice(0, 20)) {
         const marker = thread.id === current ? '*' : ' ';
-        console.log(`${marker} ${thread.id}  ${thread.title || color.dim('(untitled)')}`);
+        say(`${marker} ${thread.id}  ${thread.title || color.dim('(untitled)')}`);
       }
       return true;
     }
 
     case 'switch':
-      if (!arg) console.log('usage: /switch <threadId>');
+      if (!arg) say('usage: /switch <threadId>');
       else await session.thread.switch({ threadId: arg });
       return true;
 
     case 'context': {
       const state = await readContext(session);
-      console.log(state ? describeContextState(state) : 'no thread yet');
+      say(state ? describeContextState(state) : 'no thread yet');
       return true;
     }
 
@@ -618,7 +554,7 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
       return true;
 
     case 'usage':
-      console.log(JSON.stringify(session.getTokenUsage(), null, 2));
+      say(JSON.stringify(session.getTokenUsage(), null, 2));
       return true;
 
     case 'abort':
@@ -626,12 +562,15 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
       return true;
 
     default:
-      console.log(`unknown command: /${command} — try /help`);
+      say(`unknown command: /${command} — try /help`);
       return true;
   }
 }
 
 async function main(): Promise<void> {
+  // Before anything reads or writes: Ink on a terminal, plain lines on a pipe.
+  io = await createIo({ commands: COMMANDS });
+
   await controller.init();
 
   // The absolute path, not the folder name: two checkouts both called "api"
@@ -650,18 +589,33 @@ async function main(): Promise<void> {
   await session.permissions.setForTool({ toolName: 'submit_plan', policy: 'allow' });
   session.grantTool('submit_plan');
   if (process.env.KIRA_DEBUG) {
-    console.log(color.dim(`[debug] submit_plan policy: ${session.resolveToolApproval('submit_plan')}`));
+    say(color.dim(`[debug] submit_plan policy: ${session.resolveToolApproval('submit_plan')}`));
   }
   await session.permissions.setForCategory({ category: 'execute', policy: 'ask' });
   await applyModePermissions(session);
 
+  io.setStatus?.({
+    mode: session.mode.get(),
+    model: session.model.get() ?? defaultModel('main'),
+    cache: cacheSetting,
+  });
+  io.onInterrupt?.(() => {
+    void session.abort();
+  });
+  io.onCycleMode?.(() => {
+    const order = ['build', 'plan', 'fast'];
+    const next = order[(order.indexOf(session.mode.get()) + 1) % order.length] ?? 'build';
+    void session.mode.switch({ modeId: next });
+  });
+
   const unsubscribe = subscribe(session);
 
-  console.log(color.bold(`\nkira-code`));
-  console.log(color.dim(`project: ${PROJECT_DIR}`));
-  console.log(
+  say(color.bold(`\nkira-code`));
+  say(color.dim(`project: ${PROJECT_DIR}`));
+  say(
     color.dim(
-      `mode: ${session.mode.get()}   model: ${session.model.get() ?? defaultModel('main')}   cache: ${cacheSetting}`,
+      `mode: ${session.mode.get()}   model: ${session.model.get() ?? defaultModel('main')}   ` +
+        `cache: ${cacheSetting}   ui: ${io.interactive ? 'ink' : 'plain'}`,
     ),
   );
 
@@ -669,15 +623,15 @@ async function main(): Promise<void> {
   // they are trusted, and silence would read as "there are none".
   const untrusted = declaredServers().filter(server => server.source === 'project');
   if (untrusted.length > 0 && !projectTrusted()) {
-    console.log(
+    say(
       color.yellow(
         `\nthis project declares ${untrusted.length} MCP server(s): ${untrusted.map(server => server.name).join(', ')}`,
       ),
     );
-    console.log(color.dim('they start no processes until you run /mcp trust'));
+    say(color.dim('they start no processes until you run /mcp trust'));
   }
 
-  console.log(color.dim('\n/help for commands, /exit to quit\n'));
+  say(color.dim('\n/help for commands, /exit to quit\n'));
 
   try {
     while (true) {
@@ -695,7 +649,7 @@ async function main(): Promise<void> {
         if (!queuedPrompt) continue;
         content = queuedPrompt;
         queuedPrompt = null;
-        console.log(color.dim(content));
+        say(color.dim(content));
       }
 
       const finished = new Promise<void>(resolveRun => {
@@ -703,6 +657,7 @@ async function main(): Promise<void> {
       });
 
       try {
+        io.setStatus?.({ running: true, startedAt: Date.now() });
         await session.sendMessage({ content, requestContext: runRequestContext() });
         await finished;
       } catch (error) {
@@ -713,7 +668,7 @@ async function main(): Promise<void> {
     }
   } finally {
     unsubscribe();
-    rl.close();
+    await io.close();
     await disconnectMcp();
     await controller.destroy();
     // Closes workspace resources, including the language servers — without this

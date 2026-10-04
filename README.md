@@ -56,6 +56,9 @@ Then open [http://localhost:4111](http://localhost:4111) and pick the **kira-cod
 ```
 /mode [plan|build|fast]   show or switch mode
 /model <provider/model>   switch the model for the current mode
+/mcp [trust]              MCP servers and their state; trust the project's own
+/skills                   the skills available, and where they come from
+/skill <name> [text]      use a skill in this turn
 /perm <category> <policy> read|edit|execute|other × allow|ask|deny
 /cache [off|5m|1h]        show or set the Anthropic prompt cache
 /perms                    show current permission rules
@@ -70,7 +73,25 @@ Then open [http://localhost:4111](http://localhost:4111) and pick the **kira-cod
 /exit                     quit
 ```
 
-When a tool needs approval you get `[y]es / [n]o / [a]lways this category`. `a` grants that category for the rest of the session. When the agent submits a plan, the CLI prints it and asks you to approve or reject with feedback.
+### The screen
+
+On a terminal the CLI is an [Ink](https://github.com/vadimdemedes/ink) app; when stdout is a pipe the same session writes plain lines instead. That is not a second CLI kept alive out of nostalgia — it is how the whole thing is tested, by a script that feeds commands and reads a log (`scripts/drive-cli.sh`). `KIRA_PLAIN=1` forces the plain renderer on a terminal too, which is the quickest way to tell whether a problem belongs to the screen or to what is underneath. The startup line says which one is drawing.
+
+What the screen adds over a scrolling log:
+
+- **Tool calls show their results.** A `bash` command's output used to reach you only when the model quoted it back — paying for it twice, and stopping the moment it decided to summarise instead.
+- **Writes show a diff**, and they show it *in the approval prompt*, so you approve a change rather than a path. Once approved it is not printed again.
+- **The agent's task list is drawn live**, with the line it is working on marked. It always kept that list; it arrived as a line of JSON cut at a hundred characters.
+- **A footer** with mode, model, cache and how much of the context window is gone; while a run is in flight it carries a spinner, elapsed time and tokens. It sheds the least useful parts rather than wrapping onto a second line.
+- **Esc stops the run**, not the CLI.
+
+Approvals are a list you move through with the arrows — the letters still work — and on a pipe they stay `[y]es / [n]o / [a]lways this category`, so existing scripts do not notice. When the agent submits a plan, the CLI prints it and asks you to approve or reject with feedback.
+
+### Typing
+
+Pasted text arrives as one turn. A terminal never says "this was pasted", but it does say how much arrives at once: one line ending in a newline is someone pressing return, several lines in a single payload is a paste — and treating the second as a series of the first is how a twenty-line paste became twenty turns. The consequence is worth knowing: pasting two commands runs neither, it types both.
+
+Arrows walk the history, `/` opens a completion menu built from the help text itself, `@` completes paths from the directory you name, and Shift+Tab cycles the mode.
 
 Modes only exist in the CLI: they belong to the `AgentController` that hosts the session. Studio talks to the same agent in build mode.
 
@@ -239,6 +260,8 @@ Hiding the shell is cache-safe because the workspace registers the sandbox tools
 - `src/mastra/models.ts` — model roles, defaults, runtime overrides
 - `src/mastra/skills.ts` — the three skill sources, and who wins a name clash
 - `src/mastra/mcp.ts` — MCP config, the trust record, discovery and per-server categories
+- `src/session/` — the session's events, and the subscriber that keeps the prompt queue honest
+- `src/ui/` — the two renderers: Ink components, and the plain lines a pipe gets
 - `src/mastra/memory.ts` — memory instance, observation and reflection models
 - `src/mastra/context.ts` — compaction thresholds from the model's context window
 - `src/mastra/context-state.ts` — what the thread occupies, as the model sees it
