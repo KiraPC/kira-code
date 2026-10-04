@@ -87,6 +87,38 @@ export function diffLines(before: string, after: string): string[] {
   return [...head, color.dim(`  … ${body.length - MAX_DIFF_LINES} more lines`), ...tail];
 }
 
+/** Tools whose result is a process's output rather than a file or a lookup. */
+export const COMMAND_TOOLS = new Set<string>(['bash', 'process_output', 'kill_process']);
+
+/** The status line the sandbox appends after a failed command's output. */
+const TERMINAL_LINE = /\n*(?:Exit code: (-?\d+)|Error: (.*))\s*$/;
+
+/** Colour codes from the command itself would cancel the dimming mid-line. */
+const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+
+/**
+ * A command's output, from the end: that is where a test run puts its summary
+ * and a build its error. Long lines are cut to the terminal rather than wrapped,
+ * so one minified stack frame cannot push the rest of the block off screen.
+ */
+function commandBody(result: unknown): string[] {
+  let text = resultText(result).replace(ANSI, '').trimEnd();
+
+  const terminal = text.match(TERMINAL_LINE);
+  if (terminal) text = text.slice(0, terminal.index).trimEnd();
+
+  const width = Math.max(40, (process.stdout.columns ?? 120) - 4);
+  const lines = text && text !== '(no output)' ? text.split('\n') : [];
+  const shown = lines.slice(-MAX_RESULT_LINES).map(line => (line.length > width ? `${line.slice(0, width - 1)}…` : line));
+
+  return [
+    ...(lines.length > shown.length ? [color.dim(`  … ${lines.length - shown.length} more lines`)] : []),
+    ...shown.map(line => color.dim(`  ${line}`)),
+    ...(terminal?.[1] !== undefined ? [color.red(`  exit code ${terminal[1]}`)] : []),
+    ...(terminal?.[2] !== undefined ? [color.red(`  ✗ ${terminal[2]}`)] : []),
+  ];
+}
+
 /** The line announcing a call, before anything is known about its outcome. */
 export function toolHeader(name: string, args: unknown): string {
   const record = asRecord(args);
@@ -113,6 +145,8 @@ export function toolBody(options: {
 }): string[] {
   const { name, args, result, isError, previous } = options;
   const record = asRecord(args);
+
+  if (COMMAND_TOOLS.has(name) && !isError) return commandBody(result);
 
   if (isError) {
     // Errors are the one thing never abbreviated: a truncated failure is a

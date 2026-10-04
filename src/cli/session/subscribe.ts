@@ -225,6 +225,10 @@ export function subscribeSession(options: SubscribeOptions): () => void {
         renderer.handle({ type: 'error', message: String(event.error?.message ?? event.error) });
         break;
 
+      case 'agent_start':
+        renderer.handle({ type: 'run-start' });
+        break;
+
       case 'agent_end':
         printed.clear();
         renderer.handle({ type: 'run-end', reason: event.reason });

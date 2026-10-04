@@ -43,6 +43,11 @@ export type UiEvent =
   | { type: 'model'; model: string }
   /** Observational memory's view of the window, on every step. */
   | { type: 'context'; tokens: number; threshold: number; pending: number }
+  /**
+   * A run began streaming — the first one of a turn, and every one that
+   * resumes after an approval or a plan.
+   */
+  | { type: 'run-start' }
   /** The run reached a terminal state; `reason` is absent when it simply finished. */
   | { type: 'run-end'; reason?: string }
   | { type: 'error'; message: string }

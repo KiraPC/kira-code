@@ -39,6 +39,13 @@ import { createPlainRenderer } from './ui/plain-renderer';
 let runFinished: (() => void) | null = null;
 
 /**
+ * When the current turn began. A turn can span several runs — every approval
+ * and every plan resumes into a new one — and the footer's timer should count
+ * the turn, not restart at each of them.
+ */
+let turnStartedAt: number | null = null;
+
+/**
  * The lines renderer, plus the footer's share of the same events.
  *
  * Both renderers get the lines; only an interactive one has somewhere to put a
@@ -75,6 +82,14 @@ function createRenderer(session: Session): Renderer {
           io.setStatus?.({ tokens: session.getTokenUsage().totalTokens });
           break;
 
+        // The main loop only marks the first run of a turn as running. Without
+        // this, the run that resumes after an approval — and the whole build
+        // that follows an approved plan — ran behind a footer that said idle.
+        case 'run-start':
+          turnStartedAt ??= Date.now();
+          io.setStatus?.({ running: true, startedAt: turnStartedAt });
+          break;
+
         case 'run-end':
           io.setStatus?.({
             running: false,
@@ -97,7 +112,10 @@ function subscribe(session: Session): () => void {
     onApproval: event => handleApproval(session, event),
     onSuspension: event => handleSuspension(session, event),
     onModeChange: () => applyModePermissions(session),
-    onIdle: () => runFinished?.(),
+    onIdle: () => {
+      turnStartedAt = null;
+      runFinished?.();
+    },
   });
 }
 
@@ -191,7 +209,8 @@ async function main(): Promise<void> {
       });
 
       try {
-        io.setStatus?.({ running: true, startedAt: Date.now() });
+        turnStartedAt = Date.now();
+        io.setStatus?.({ running: true, startedAt: turnStartedAt });
         await session.sendMessage({ content, requestContext: runRequestContext() });
         await finished;
       } catch (error) {

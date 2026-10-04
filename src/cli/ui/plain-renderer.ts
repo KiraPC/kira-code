@@ -1,7 +1,7 @@
 import type { Renderer, UiEvent } from '../session/events';
 import { color } from './color';
 import type { Io } from './io';
-import { toolBody, toolHeader } from './tool-view';
+import { COMMAND_TOOLS, toolBody, toolHeader } from './tool-view';
 
 /**
  * Lines, one per fact, with no live state: a spinner or a footer would only
@@ -33,9 +33,10 @@ export function createPlainRenderer(io: Io, shownAtApproval?: Set<string>): Rend
         case 'tool-end': {
           // A call you approved already showed its diff, in the prompt that
           // asked about it. Printing the same lines again on the way out says
-          // nothing and buries what follows.
+          // nothing and buries what follows. A command is the exception: the
+          // prompt showed what would run, and only now is there output.
           const alreadySeen = shownAtApproval?.delete(event.id) ?? false;
-          if (alreadySeen && !event.isError) break;
+          if (alreadySeen && !event.isError && !COMMAND_TOOLS.has(event.name)) break;
 
           for (const line of toolBody(event)) io.line(line);
           break;
