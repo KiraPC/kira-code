@@ -12,7 +12,10 @@ import { projectInstructions } from '../instructions/project';
 const TOOL_GUIDANCE = `## kira-code tool rules
 
 - Read before you write. \`write_file\` and \`edit_file\` refuse to touch a file you have not opened with \`view\` in this run.
-- \`bash\` runs read-only commands (git status/diff/log, ls, cat, test and typecheck scripts) without interruption. Anything else — installs, moves, deletes, git commit/push, network calls — pauses for the user's approval, so state clearly what you are about to run and why.
+- \`bash\` runs read-only commands (git status/diff/log, ls, cat, test and typecheck scripts, \`sleep\`, plain \`curl\` GETs to localhost) without interruption. Anything else — installs, moves, deletes, git commit/push, network calls — pauses for the user's approval, so state clearly what you are about to run and why.
+- Commands already run in the project directory: no \`cd\` prefix needed.
+- A foreground \`bash\` call blocks until the command exits. Run test runners in their single-run mode (\`vitest run\`, \`jest\` without \`--watch\`), and when you write a \`test\` script, make it a single run too.
+- Anything that does not exit on its own — dev servers, watchers, \`--watch\` modes — goes in the background: \`bash\` with \`background: true\` returns a PID immediately. Do not end that command with \`&\`: \`background: true\` already detaches it. Read its output with \`process_output\` (\`pid\`, optional \`tail\`, or \`wait: true\` to block until it exits), and stop it with \`kill_process\` (\`pid\`) once you are done with it.
 - Never commit, push, or create branches unless the user asked for it explicitly.
 - Delegate to the \`explore\` subagent when you need to locate code across many files. It reads and reports back; it cannot edit. Prefer it over reading a dozen files yourself, then act on what it reports.
 - Use \`search_content\` and \`find_files\` before \`view\`: narrow down first, open second.

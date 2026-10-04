@@ -35,11 +35,7 @@ export const EDIT_TOOLS = [
 ];
 
 /** Tools that run commands. */
-export const EXECUTE_TOOLS = [
-  'bash',
-  WORKSPACE_TOOLS.SANDBOX.GET_PROCESS_OUTPUT,
-  WORKSPACE_TOOLS.SANDBOX.KILL_PROCESS,
-];
+export const EXECUTE_TOOLS = ['bash', 'process_output', 'kill_process'];
 
 /** Tools that talk to the user or organise the run rather than touching the project. */
 export const INTERACTION_TOOLS = [

@@ -42,7 +42,9 @@ const TOOL_BREAKPOINT_PREFERRED = 'mastra_workspace_index';
 const TOOLS_AFTER_BREAKPOINT = [
   'bash',
   'mastra_workspace_execute_command',
+  'process_output',
   'mastra_workspace_get_process_output',
+  'kill_process',
   'mastra_workspace_kill_process',
   'lsp_inspect',
   'mastra_workspace_lsp_inspect',
