@@ -68,6 +68,32 @@ function contentBlockCount(message: PromptMessage): number {
 }
 
 /**
+ * A **transient** signal in the outbound prompt.
+ *
+ * Core marks a delivery-only reminder with `providerOptions.mastra.transient` on the
+ * projected message's text parts (`MessageList.convertSignalForModelPrompt`). That
+ * marker — not the rendered `<system-reminder>` tag — is what to match on: the tag is
+ * shared with reminders that ARE persisted, and excluding those from the cache spans
+ * would give up caching for rows that stay put across turns.
+ *
+ * Why exclude the transient ones: they are in the live prompt but never persisted, so
+ * the next turn reloads a history without them. A cached span containing one diverges
+ * from the reloaded history at exactly that index and dies at the turn boundary —
+ * measured on Haiku 4.5, a full ~15k-token prefix rebuild on the first step of every
+ * turn (~1.6x the token cost of the same conversation with no signal).
+ *
+ * Core already keeps the reminder deduplicated and last in the prompt, so all this
+ * consumer has to do is keep its breakpoints behind it. Breakpoint placement is the
+ * consumer's job, which is why this lives here rather than in core.
+ */
+function isTransientReminder(message: PromptMessage): boolean {
+  if (message?.role !== 'user' || !Array.isArray(message.content)) return false;
+  return (message.content as Array<{ providerOptions?: { mastra?: { transient?: unknown } } }>).some(
+    part => part?.providerOptions?.mastra?.transient === true,
+  );
+}
+
+/**
  * The first system message — ours, the one built to be byte-identical.
  *
  * Mastra Code marks the *last* system block instead, which covers the blocks
@@ -97,6 +123,9 @@ function chooseBreakpoints(prompt: ProcessLLMRequestArgs['prompt']): number[] {
     // A system message is already covered by the instructions breakpoint.
     if (!message || message.role === 'system' || !Array.isArray(message.content)) continue;
     if (message.content.length === 0) continue;
+    // Never mark a transient reminder: a breakpoint on it would pull the one row that
+    // is absent from next turn's reloaded history back into the cached span.
+    if (isTransientReminder(message)) continue;
 
     // Always anchor the newest eligible message: that is the point the next
     // request will look back to.
