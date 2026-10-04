@@ -1,5 +1,6 @@
 import type { ToolCategory } from '@mastra/core/agent-controller';
 import { WORKSPACE_TOOLS } from '@mastra/core/workspace';
+import { mcpCategoryFor } from './mcp';
 
 /** Tools that only observe — the project, or the skills available for it. */
 export const READ_TOOLS = [
@@ -17,6 +18,11 @@ export const READ_TOOLS = [
   'skill',
   'skill_search',
   'skill_read',
+  // The tool-search meta-tools: they read a catalogue and load a name into the
+  // run. What the loaded tool is then allowed to do is decided when it is
+  // called, by its own category.
+  'search_tools',
+  'load_tool',
 ];
 
 /** Tools that change files. */
@@ -64,7 +70,11 @@ const CATEGORY_BY_TOOL = new Map<string, ToolCategory>([
  * host can say "ask before anything that executes" instead of listing tools.
  */
 export function toolCategoryResolver(toolName: string): ToolCategory | null {
-  return CATEGORY_BY_TOOL.get(toolName) ?? null;
+  // Ours first, then the MCP servers: a tool named `<server>_<tool>` inherits
+  // the category its server declared, and `execute` when it declared none.
+  // Returning null here is what left updateWorkingMemory and the skill tools
+  // behind an approval prompt by accident, so an unknown name is worth noticing.
+  return CATEGORY_BY_TOOL.get(toolName) ?? mcpCategoryFor(toolName);
 }
 
 export const PLAN_MODE_INSTRUCTIONS = `You are in PLAN mode.

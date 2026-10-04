@@ -1,6 +1,9 @@
 import { createCodingAgent } from '@mastra/core/coding-agent';
+import { ToolSearchProcessor } from '@mastra/core/processors';
 import { askUserTool, submitPlanTool, webFetchTool, webSearchTool } from '@mastra/core/tools';
 import { PROJECT_NAME } from '../config';
+import { inPlanMode } from '../controller-context';
+import { mcpCategoryFor, mcpTools } from '../mcp';
 import { memory } from '../memory';
 import { kiraRequestContextSchema, resolveModel } from '../models';
 import { nestedInstructionsProcessor } from '../processors/nested-instructions';
@@ -9,6 +12,34 @@ import { sessionContextProcessor } from '../processors/session-context';
 import { buildInstructions } from '../prompts/system';
 import { workspace } from '../workspace';
 import { exploreAgent } from './explore-agent';
+
+/**
+ * MCP tools, kept out of the prompt until the model asks for them.
+ *
+ * Built once and reused: the processor indexes the catalogue, and rebuilding it
+ * per request would reconnect to every server on every turn. `mcpTools()` is
+ * itself lazy, so a session that never mentions MCP never connects.
+ */
+let toolSearch: ToolSearchProcessor | null = null;
+
+async function mcpToolSearch(): Promise<ToolSearchProcessor> {
+  if (toolSearch) return toolSearch;
+
+  toolSearch = new ToolSearchProcessor({
+    tools: (await mcpTools()) as never,
+    // Derived from the conversation rather than a process-local map: what the
+    // model loaded survives a restart, and is forgotten when the message that
+    // loaded it leaves the window.
+    storage: 'context',
+    search: { topK: 5, autoLoad: true },
+    // Plan mode has no shell and refuses project writes; without this an MCP
+    // server would be the one way left to change something from a plan.
+    filter: ({ toolName, requestContext }) =>
+      !inPlanMode(requestContext) || mcpCategoryFor(toolName) === 'read',
+  });
+
+  return toolSearch;
+}
 
 /**
  * kira-code: a coding agent over the local project. `createCodingAgent` supplies
@@ -48,6 +79,13 @@ export const kiraCode = createCodingAgent({
     nestedInstructionsProcessor,
     ...(await memory.getInputProcessors([], requestContext)),
     promptCacheProcessor,
+    // Last on purpose. MCP tools reached through this processor are merged into
+    // the request *after* the workspace tools (`inputProcessorLoadedTools` is
+    // spread last in convertTools), so they land behind the cache breakpoint on
+    // mastra_workspace_index. Handed to the agent directly instead, they would
+    // sit in front of it and every change of MCP configuration would rewrite the
+    // cached prefix.
+    await mcpToolSearch(),
   ],
   tools: {
     ask_user: askUserTool,

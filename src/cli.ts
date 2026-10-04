@@ -21,6 +21,7 @@ import { PROJECT_DIR } from './mastra/config';
 import { describeContextState, readContextState, type ContextState } from './mastra/context-state';
 import { controller } from './mastra/controller';
 import { mastra } from './mastra/index';
+import { declaredServers, disconnectMcp, mcpStatus, projectConfigPath, projectTrusted, trustProjectConfig } from './mastra/mcp';
 import { memory } from './mastra/memory';
 import { defaultModel } from './mastra/models';
 import { listSkills } from './mastra/skills';
@@ -436,6 +437,7 @@ Commands:
   /cache [off|5m|1h]        show or set the prompt-cache TTL
   /context                  how much of the context window is in use
   /compact [instructions]   compact now: fold messages into observations
+  /mcp [trust]              MCP servers and their state; trust the project's own
   /skills                   list the skills available, and where they come from
   /skill <name> [text]      use a skill in this turn
   /perm <category> <policy> set a permission (read|edit|execute|other × allow|ask|deny)
@@ -505,6 +507,45 @@ async function runCommand(session: Session, line: string): Promise<boolean> {
     case 'new': {
       const thread = await session.thread.create({ title: arg || undefined });
       console.log(color.dim(`new thread ${thread.id}`));
+      return true;
+    }
+
+    case 'mcp': {
+      if (arg === 'trust') {
+        const result = trustProjectConfig();
+        console.log(
+          result.trusted
+            ? color.green(`trusted ${projectConfigPath()} — its servers start from the next turn`)
+            : color.red(`nothing to trust: ${result.reason}`),
+        );
+        return true;
+      }
+
+      if (arg) {
+        console.log(color.dim('usage: /mcp [trust]'));
+        return true;
+      }
+
+      const servers = await mcpStatus();
+      if (servers.length === 0) {
+        console.log(color.dim('no MCP servers configured'));
+        return true;
+      }
+
+      for (const server of servers) {
+        const state = server.error
+          ? color.red('error')
+          : server.active
+            ? `${server.tools} tools`
+            : color.yellow('not trusted');
+        console.log(`${server.name}  ${color.dim(`(${server.source}, ${server.category})`)}  ${state}`);
+        console.log(color.dim(`  ${server.transport}`));
+        if (server.error) console.log(color.dim(`  ${server.error}`));
+      }
+
+      if (servers.some(server => !server.active)) {
+        console.log(color.dim(`\nrun /mcp trust to enable the servers declared in ${projectConfigPath()}`));
+      }
       return true;
     }
 
@@ -623,7 +664,20 @@ async function main(): Promise<void> {
       `mode: ${session.mode.get()}   model: ${session.model.get() ?? defaultModel('main')}   cache: ${cacheSetting}`,
     ),
   );
-  console.log(color.dim('/help for commands, /exit to quit\n'));
+
+  // Said once, at the start: a project's MCP servers are read but inert until
+  // they are trusted, and silence would read as "there are none".
+  const untrusted = declaredServers().filter(server => server.source === 'project');
+  if (untrusted.length > 0 && !projectTrusted()) {
+    console.log(
+      color.yellow(
+        `\nthis project declares ${untrusted.length} MCP server(s): ${untrusted.map(server => server.name).join(', ')}`,
+      ),
+    );
+    console.log(color.dim('they start no processes until you run /mcp trust'));
+  }
+
+  console.log(color.dim('\n/help for commands, /exit to quit\n'));
 
   try {
     while (true) {
@@ -660,6 +714,7 @@ async function main(): Promise<void> {
   } finally {
     unsubscribe();
     rl.close();
+    await disconnectMcp();
     await controller.destroy();
     // Closes workspace resources, including the language servers — without this
     // their child processes keep the CLI alive after the loop ends.

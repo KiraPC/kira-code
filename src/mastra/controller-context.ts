@@ -34,3 +34,8 @@ export function getControllerContext(
 
   return typeof raw === 'object' && raw !== null ? (raw as ControllerContext) : undefined;
 }
+
+/** Whether this run is in plan mode, where nothing may change the project. */
+export function inPlanMode(requestContext?: RequestContextLike): boolean {
+  return getControllerContext(requestContext)?.session?.modeId === 'plan';
+}

@@ -2,15 +2,11 @@ import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { LocalFilesystem, LocalSandbox, WORKSPACE_TOOLS, Workspace } from '@mastra/core/workspace';
 import { GLOBAL_SKILLS_DIR, KIRA_HOME, PROJECT_DIR, SKILLS_DIR } from './config';
-import { getControllerContext, type RequestContextLike } from './controller-context';
+import { inPlanMode, type RequestContextLike } from './controller-context';
 import { skillPaths } from './skills';
 
 /** Where the agent writes plans it submits for approval. */
 export const PLANS_DIR = '.kira/plans';
-
-function inPlanMode(requestContext?: RequestContextLike): boolean {
-  return getControllerContext(requestContext)?.session?.modeId === 'plan';
-}
 
 function toAbsolute(path: unknown): string | null {
   return typeof path === 'string' && path.length > 0 ? resolve(PROJECT_DIR, path) : null;

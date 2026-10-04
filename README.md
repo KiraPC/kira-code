@@ -20,6 +20,7 @@ Two front ends over the same agent, sharing threads and memory: a **terminal CLI
 - Context compaction, automatic on a token threshold and on demand with `/compact`
 - Project instructions: `AGENTS.md` is loaded at the start, nested ones when the agent enters their subtree
 - Skills from three sources — kira-code's own, yours, and the project's — with `/skills` and `/skill`
+- MCP client: external servers' tools, kept out of the prompt until the model asks for them
 
 ## Get started
 
@@ -159,6 +160,36 @@ On a name clash the most specific source wins — a project's `code-review` repl
 
 Project skills are instructions from the checkout, like `AGENTS.md`, so `KIRA_INSTRUCTIONS=off` drops them too — built-in and global ones stay, because those are yours. The two directories outside the project are reachable through `allowedPaths` so `skill_read` can open a skill's reference files; that exception is not read-only, so the agent can also write there, behind the usual `edit` approval.
 
+## MCP
+
+kira-code is an MCP client: servers you configure contribute their tools to the agent. Two sources — `~/.kira/mcp.json` (yours, always active, `KIRA_MCP_CONFIG`) and `<project>/.kira/mcp.json`.
+
+```jsonc
+{
+  "servers": {
+    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"],
+                "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }, "category": "execute" },
+    "docs":   { "url": "https://docs.example.com/mcp",
+                "headers": { "Authorization": "Bearer ${DOCS_TOKEN}" }, "category": "read" }
+  }
+}
+```
+
+`${VAR}` is expanded from the environment, so tokens stay out of the file. `category` decides what the server's tools may do without asking — `read` runs freely, `execute` (the default when absent) goes through the approval prompt. Tools are named `serverName_toolName`, which is how a tool inherits its server's category.
+
+**A project's servers do not start until you trust them.** A server definition is a command line, so a checkout that declares one is asking to run a process on your machine — a larger request than an `AGENTS.md` makes. `<project>/.kira/mcp.json` is read, reported at startup and by `/mcp`, and stays inert until `/mcp trust`. Consent is recorded against a hash of the file, so editing it withdraws the consent and it has to be given again.
+
+```
+/mcp            servers, source, category, tool count, errors
+/mcp trust      enable the ones this project declares
+```
+
+The tools reach the model through `search_tools` / `load_tool` rather than sitting in the prompt, and that is a cache decision before it is a token one. In Mastra's `convertTools` the tools resolved for a request are spread *before* the workspace tools — that is, before the cache breakpoint on `mastra_workspace_index` — while tools a processor loads are spread last. Handed over directly, every change of MCP configuration would rewrite the cached prefix; loaded on demand they land behind it. Measured on the same two-turn conversation, with the server configured and without: `cacheRead 15,902` both times, and the same 27 tools in the prefix.
+
+In plan mode only servers declared `read` are searchable — otherwise an MCP server would be the one way left to change something from a plan, since the workspace hook that guards plan mode never sees these tools.
+
+A server that fails to start is reported by `/mcp` and ignored; discovery is lazy, so a session that never needs MCP never connects, and one bad server costs a timeout rather than the CLI. Servers that require an interactive OAuth login are not supported from here — token-based ones work.
+
 ## Context compaction
 
 Long threads outgrow the context window. Observational memory folds older messages into an observation log and drops them from the request: the thread continues, the raw history stays in the database, and what the model sees is a summary instead of the transcript.
@@ -207,6 +238,7 @@ Hiding the shell is cache-safe because the workspace registers the sandbox tools
 - `src/mastra/workspace.ts` — tool names, approval and mode policy, LSP, search
 - `src/mastra/models.ts` — model roles, defaults, runtime overrides
 - `src/mastra/skills.ts` — the three skill sources, and who wins a name clash
+- `src/mastra/mcp.ts` — MCP config, the trust record, discovery and per-server categories
 - `src/mastra/memory.ts` — memory instance, observation and reflection models
 - `src/mastra/context.ts` — compaction thresholds from the model's context window
 - `src/mastra/context-state.ts` — what the thread occupies, as the model sees it
