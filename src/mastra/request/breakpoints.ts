@@ -1,5 +1,5 @@
 import type { ProcessInputStepArgs, ProcessLLMRequestArgs, Processor } from '@mastra/core/processors';
-import { cacheControlOptions, isAnthropicModel, resolveCacheSetting } from '../cache';
+import { cacheControlOptions, isAnthropicModel, resolveCacheSetting } from './cache';
 
 /**
  * Rolling cache breakpoints over the conversation.

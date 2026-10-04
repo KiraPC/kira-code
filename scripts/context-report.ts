@@ -9,8 +9,8 @@
  *   npx tsx scripts/context-report.ts <threadId> [label]
  */
 import '../src/cli-bootstrap';
-import { readContextState } from '../src/mastra/context-usage';
-import { contextTokenBudget, memory } from '../src/mastra/memory';
+import { readContextState } from '../src/mastra/memory/usage';
+import { contextTokenBudget, memory } from '../src/mastra/memory/index';
 import { defaultModel } from '../src/mastra/models';
 
 const [threadId, label] = process.argv.slice(2);

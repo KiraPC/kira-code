@@ -1,6 +1,6 @@
 import type { RequestContext } from '@mastra/core/request-context';
 import { z } from 'zod';
-import { getControllerContext } from './controller-context';
+import { getControllerContext } from './controller/selection';
 
 /**
  * kira-code is model agnostic: nothing here is hardcoded into the agents.

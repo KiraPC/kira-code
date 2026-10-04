@@ -1,5 +1,5 @@
 import { AgentsMDInjector } from '@mastra/core/processors';
-import { ignoredInstructionPaths, instructionsEnabled } from '../prompts/project-instructions';
+import { ignoredInstructionPaths, instructionsEnabled } from './project';
 
 /**
  * Instruction files that belong to a subtree, injected when the agent works in

@@ -1,9 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Session } from '@mastra/core/agent-controller';
-import { PROJECT_DIR } from '../mastra/config';
-import { color } from '../ui/color';
-import { approvalContext } from '../ui/tool-view';
+import { PROJECT_DIR } from '../config';
+import { color } from './ui/color';
+import { approvalContext } from './ui/tool-view';
 import { ask, io, say, shownAtApproval } from './state';
 
 /**

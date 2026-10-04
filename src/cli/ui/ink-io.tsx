@@ -1,4 +1,8 @@
 import { render } from 'ink';
+// In scope because the JSX here compiles to `React.createElement`: tsconfig
+// says `jsx: react` for that reason. It briefly said `react-jsx`, the compiler
+// reported this import as unused, removing it threw at the first render.
+import React from 'react';
 import { App } from './app.js';
 import type { Io } from './io.js';
 import { UiStore, type Choice, type UiStatus } from './store.js';

@@ -14,7 +14,7 @@
  *   npx tsx scripts/reset-working-memory.ts --yes    # clear it
  */
 import '../src/cli-bootstrap';
-import { memory } from '../src/mastra/memory';
+import { memory } from '../src/mastra/memory/index';
 
 const confirmed = process.argv.includes('--yes');
 
@@ -32,7 +32,7 @@ const resources = store as unknown as {
 // The store has no "list every resource" call, so the ids come from the threads
 // table: a resource without a thread has no working memory to clear either.
 const { createClient } = await import('@libsql/client');
-const { KIRA_HOME } = await import('../src/mastra/config');
+const { KIRA_HOME } = await import('../src/config');
 const db = createClient({ url: `file:${KIRA_HOME}/mastra.db` });
 
 const rows = await db.execute('select distinct "resourceId" from mastra_threads where "resourceId" is not null');

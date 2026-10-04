@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { MastraCompositeStore } from '@mastra/core/storage';
 import { DuckDBStore } from '@mastra/duckdb';
 import { LibSQLStore } from '@mastra/libsql';
-import { KIRA_HOME } from './config';
+import { KIRA_HOME } from '../config';
 
 /**
  * One store shared by the Mastra instance and the AgentController, so threads,

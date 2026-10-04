@@ -1,9 +1,9 @@
 import { AgentController } from '@mastra/core/agent-controller';
-import { kiraCode } from './agents/kira-code';
-import { defaultModel } from './models';
+import { kiraCode } from '../agent/kira-code';
+import { defaultModel } from '../models';
 import { toolCategoryResolver } from './modes';
-import { storage } from './storage';
-import { workspace } from './workspace';
+import { storage } from '../storage';
+import { workspace } from '../agent/workspace';
 
 /**
  * Mode instructions are deliberately NOT set here. The controller concatenates

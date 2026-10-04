@@ -1,5 +1,5 @@
 import { estimateTokenCount } from 'tokenx';
-import { contextTokenBudget, memory } from './memory';
+import { contextTokenBudget, memory } from './index';
 
 /**
  * What a thread currently occupies, measured the way the model sees it.

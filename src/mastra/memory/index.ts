@@ -1,7 +1,7 @@
 import { Memory } from '@mastra/memory';
-import { contextBudget } from './context-budget';
-import { resolveModel } from './models';
-import { storage } from './storage';
+import { contextBudget } from './budget';
+import { resolveModel } from '../models';
+import { storage } from '../storage';
 
 /**
  * The agent's memory, exported rather than built inline so the CLI can reach

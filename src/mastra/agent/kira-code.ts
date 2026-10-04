@@ -1,17 +1,17 @@
 import { createCodingAgent } from '@mastra/core/coding-agent';
 import { ToolSearchProcessor } from '@mastra/core/processors';
 import { askUserTool, submitPlanTool, webFetchTool, webSearchTool } from '@mastra/core/tools';
-import { PROJECT_NAME } from '../config';
-import { inPlanMode } from '../controller-context';
+import { PROJECT_NAME } from '../../config';
+import { inPlanMode } from '../controller/selection';
 import { mcpCategoryFor, mcpTools } from '../mcp';
-import { memory } from '../memory';
+import { memory } from '../memory/index';
 import { kiraRequestContextSchema, resolveModel } from '../models';
-import { nestedInstructionsProcessor } from '../processors/nested-instructions';
-import { promptCacheProcessor } from '../processors/prompt-cache';
-import { sessionContextProcessor } from '../processors/session-context';
-import { buildInstructions } from '../prompts/system';
-import { workspace } from '../workspace';
-import { exploreAgent } from './explore-agent';
+import { nestedInstructionsProcessor } from '../instructions/nested';
+import { promptCacheProcessor } from '../request/breakpoints';
+import { sessionContextProcessor } from '../request/session-facts';
+import { buildInstructions } from './system-prompt';
+import { workspace } from './workspace';
+import { exploreAgent } from './explore';
 
 /**
  * MCP tools, kept out of the prompt until the model asks for them.

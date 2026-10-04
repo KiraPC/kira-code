@@ -1,9 +1,9 @@
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { LocalFilesystem, LocalSandbox, WORKSPACE_TOOLS, Workspace } from '@mastra/core/workspace';
-import { GLOBAL_SKILLS_DIR, KIRA_HOME, PROJECT_DIR, SKILLS_DIR } from './config';
-import { inPlanMode, type RequestContextLike } from './controller-context';
-import { skillPaths } from './skills';
+import { GLOBAL_SKILLS_DIR, KIRA_HOME, PROJECT_DIR, SKILLS_DIR } from '../../config';
+import { inPlanMode, type RequestContextLike } from '../controller/selection';
+import { skillPaths } from '../skills';
 
 /** Where the agent writes plans it submits for approval. */
 export const PLANS_DIR = '.kira/plans';

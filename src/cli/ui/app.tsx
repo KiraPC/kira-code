@@ -1,6 +1,6 @@
 import { Box, Static, Text, useApp, useInput } from 'ink';
 import React, { useSyncExternalStore } from 'react';
-import { PROJECT_DIR } from '../mastra/config.js';
+import { PROJECT_DIR } from '../../config.js';
 import { Footer } from './footer.js';
 import { completeCommand, completePath, interpret, tokenAt } from './input.js';
 import { Prompt } from './prompt.js';

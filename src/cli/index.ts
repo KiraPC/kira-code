@@ -9,10 +9,16 @@
  */
 // Must come first: resolves KIRA_HOME, loads the env file, and defaults the
 // project directory to the cwd the CLI was started in.
-import './cli-bootstrap';
+import '../cli-bootstrap';
 import type { Session } from '@mastra/core/agent-controller';
-import { handleApproval, handleSuspension } from './cli/approvals';
-import { COMMANDS, runCommand } from './cli/commands';
+import { controller } from '../mastra/controller/index';
+import { mastra } from '../mastra/index';
+import { declaredServers, disconnectMcp, projectTrusted } from '../mastra/mcp';
+import { PROJECT_DIR } from '../config';
+import { defaultModel } from '../mastra/models';
+import type { Renderer } from './session/events';
+import { handleApproval, handleSuspension } from './approvals';
+import { COMMANDS, runCommand } from './commands';
 import {
   applyModePermissions,
   ask,
@@ -23,13 +29,7 @@ import {
   setIo,
   shownAtApproval,
   takeQueuedPrompt,
-} from './cli/state';
-import { PROJECT_DIR } from './mastra/config';
-import { controller } from './mastra/controller';
-import { mastra } from './mastra/index';
-import { declaredServers, disconnectMcp, projectTrusted } from './mastra/mcp';
-import { defaultModel } from './mastra/models';
-import type { Renderer } from './session/events';
+} from './state';
 import { subscribeSession } from './session/subscribe';
 import { color } from './ui/color';
 import { createIo } from './ui/io';

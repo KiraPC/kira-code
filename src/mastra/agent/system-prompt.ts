@@ -1,8 +1,8 @@
 import { buildBasePrompt } from '@mastra/core/coding-agent';
 import type { CoreSystemMessage } from '@mastra/core/llm';
 import type { RequestContext } from '@mastra/core/request-context';
-import { PLATFORM, PROJECT_DIR, PROJECT_NAME } from '../config';
-import { projectInstructions } from './project-instructions';
+import { PLATFORM, PROJECT_DIR, PROJECT_NAME } from '../../config';
+import { projectInstructions } from '../instructions/project';
 
 /**
  * kira-code specific rules layered on top of the base coding-agent prompt.

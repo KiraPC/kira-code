@@ -1,6 +1,6 @@
 import type { ToolCategory } from '@mastra/core/agent-controller';
 import { WORKSPACE_TOOLS } from '@mastra/core/workspace';
-import { mcpCategoryFor } from './mcp';
+import { mcpCategoryFor } from '../mcp';
 
 /** Tools that only observe — the project, or the skills available for it. */
 export const READ_TOOLS = [

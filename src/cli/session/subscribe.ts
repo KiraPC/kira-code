@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Session } from '@mastra/core/agent-controller';
-import { PROJECT_DIR } from '../mastra/config';
+import { PROJECT_DIR } from '../../config';
 import type { Renderer, TaskItem } from './events';
 
 /**

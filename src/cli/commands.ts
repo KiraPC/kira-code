@@ -1,11 +1,11 @@
 import type { Session } from '@mastra/core/agent-controller';
-import { isCacheSetting } from '../mastra/cache';
-import { describeContextState, readContextState, type ContextState } from '../mastra/context-usage';
+import { isCacheSetting } from '../mastra/request/cache';
+import { describeContextState, readContextState, type ContextState } from '../mastra/memory/usage';
 import { mcpStatus, projectConfigPath, trustProjectConfig } from '../mastra/mcp';
-import { memory } from '../mastra/memory';
+import { memory } from '../mastra/memory/index';
 import { defaultModel } from '../mastra/models';
 import { listSkills } from '../mastra/skills';
-import { color } from '../ui/color';
+import { color } from './ui/color';
 import { cacheSetting, queuePrompt, say, setCacheSetting, setEditPolicy } from './state';
 
 /**

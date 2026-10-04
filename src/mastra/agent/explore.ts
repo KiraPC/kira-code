@@ -1,7 +1,7 @@
 import { Agent } from '@mastra/core/agent';
-import { PROJECT_DIR } from '../config';
+import { PROJECT_DIR } from '../../config';
 import { resolveModel } from '../models';
-import { readOnlyWorkspace } from '../workspace';
+import { readOnlyWorkspace } from './workspace';
 
 /**
  * Read-only search agent. The parent delegates broad "where does X live"

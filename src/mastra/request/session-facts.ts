@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import type { ComputeStateSignalArgs, Processor } from '@mastra/core/processors';
-import { getControllerContext } from '../controller-context';
-import { MODE_INSTRUCTIONS } from '../modes';
-import { PLATFORM, PROJECT_DIR, PROJECT_NAME } from '../config';
+import { getControllerContext } from '../controller/selection';
+import { MODE_INSTRUCTIONS } from '../controller/modes';
+import { PLATFORM, PROJECT_DIR, PROJECT_NAME } from '../../config';
 import { defaultModel } from '../models';
 
 /**

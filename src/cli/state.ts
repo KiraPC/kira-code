@@ -1,7 +1,7 @@
 import type { Session } from '@mastra/core/agent-controller';
 import { RequestContext } from '@mastra/core/request-context';
-import { defaultCacheSetting, type CacheSetting } from '../mastra/cache';
-import type { Io } from '../ui/io';
+import { defaultCacheSetting, type CacheSetting } from '../mastra/request/cache';
+import type { Io } from './ui/io';
 
 /**
  * The handful of things the CLI's parts share.

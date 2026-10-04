@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { CoreSystemMessage } from '@mastra/core/llm';
 import { estimateTokenCount } from 'tokenx';
-import { PROJECT_DIR } from '../config';
+import { PROJECT_DIR } from '../../config';
 
 /**
  * The project's own instruction file — AGENTS.md and friends.

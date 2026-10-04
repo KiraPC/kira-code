@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import type { ToolCategory } from '@mastra/core/agent-controller';
 import type { MCPClient as MCPClientType } from '@mastra/mcp';
-import { PROJECT_DIR } from './config';
+import { PROJECT_DIR } from '../config';
 
 /**
  * MCP servers: where they are declared, which ones are allowed to run, and what

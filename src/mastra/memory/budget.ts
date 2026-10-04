@@ -1,4 +1,4 @@
-import { defaultModel } from './models';
+import { defaultModel } from '../models';
 
 /**
  * Token budgets for observational memory, sized against the model's context

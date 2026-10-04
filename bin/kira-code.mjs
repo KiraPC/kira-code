@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tsx = resolve(packageRoot, 'node_modules', '.bin', 'tsx');
-const entry = resolve(packageRoot, 'src', 'cli.ts');
+const entry = resolve(packageRoot, 'src', 'cli', 'index.ts');
 
 const child = spawn(tsx, [entry, ...process.argv.slice(2)], { stdio: 'inherit' });
 

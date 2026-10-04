@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { GLOBAL_SKILLS_DIR, PROJECT_SKILLS_DIR, SKILLS_DIR } from './config';
-import { instructionsEnabled } from './prompts/project-instructions';
+import { GLOBAL_SKILLS_DIR, PROJECT_SKILLS_DIR, SKILLS_DIR } from '../config';
+import { instructionsEnabled } from './instructions/project';
 
 /**
  * Where skills come from, and who wins when two of them share a name.

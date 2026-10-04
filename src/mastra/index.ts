@@ -5,9 +5,9 @@ import {
   Observability,
   SensitiveDataFilter,
 } from '@mastra/observability';
-import { exploreAgent } from './agents/explore-agent';
-import { kiraCode } from './agents/kira-code';
-import { controller } from './controller';
+import { exploreAgent } from './agent/explore';
+import { kiraCode } from './agent/kira-code';
+import { controller } from './controller/index';
 import { storage } from './storage';
 
 export const mastra = new Mastra({
