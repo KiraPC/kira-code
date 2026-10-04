@@ -100,6 +100,9 @@ Commands:
   /abort                    stop the active run
   /help                     this list
   /exit                     quit
+
+Flags:
+  --studio                  after /exit, open Mastra Studio on this session's traces
 `;
 
 /**

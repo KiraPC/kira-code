@@ -31,6 +31,7 @@ import {
   takeQueuedPrompt,
 } from './state';
 import { subscribeSession } from './session/subscribe';
+import { runStudio, studioRequested } from './studio';
 import { color } from './ui/color';
 import { createIo } from './ui/io';
 import { createPlainRenderer } from './ui/plain-renderer';
@@ -183,6 +184,8 @@ async function main(): Promise<void> {
     say(color.dim('they start no processes until you run /mcp trust'));
   }
 
+  if (studioRequested) say(color.dim('\nstudio: opens after /exit, with the traces of this session'));
+
   say(color.dim('\n/help for commands, /exit to quit\n'));
 
   try {
@@ -228,6 +231,8 @@ async function main(): Promise<void> {
     // their child processes keep the CLI alive after the loop ends.
     await mastra.shutdown();
   }
+
+  if (studioRequested) process.exitCode = await runStudio();
 }
 
 main().catch(error => {

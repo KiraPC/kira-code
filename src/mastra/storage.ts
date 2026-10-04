@@ -45,6 +45,27 @@ if (typeof memoryPrototype.patchThread !== 'function') {
 }
 
 /**
+ * The DuckDB file behind observability. Kept by reference because the
+ * composite store only holds its observability domain, and closing the
+ * composite (what `Mastra.shutdown()` does) leaves the DuckDB instance — and
+ * its single-writer file lock — open until the process exits.
+ */
+const observabilityDb = new DuckDBStore({
+  // Absolute for the same reason as the LibSQL url below, and so the CLI doesn't
+  // drop telemetry files into whatever project it was started from.
+  path: resolve(KIRA_HOME, 'mastra.duckdb'),
+});
+
+/**
+ * Frees the DuckDB lock. DuckDB allows one read-write process per file, so
+ * Studio cannot open the traces while the CLI still holds it; `--studio` calls
+ * this after shutting the CLI's Mastra instance down, before starting Studio.
+ */
+export async function releaseObservabilityStore(): Promise<void> {
+  await observabilityDb.close();
+}
+
+/**
  * One store shared by the Mastra instance and the AgentController, so threads,
  * messages and thread settings are the same whether you drive kira-code from
  * Studio or from the CLI.
@@ -60,10 +81,6 @@ export const storage = new MastraCompositeStore({
     authToken: process.env.TURSO_AUTH_TOKEN || undefined,
   }),
   domains: {
-    // Absolute for the same reason as above, and so the CLI doesn't drop
-    // telemetry files into whatever project it was started from.
-    observability: await new DuckDBStore({
-      path: resolve(KIRA_HOME, 'mastra.duckdb'),
-    }).getStore('observability'),
+    observability: await observabilityDb.getStore('observability'),
   },
 });
