@@ -29,7 +29,8 @@ export const controller = new AgentController({
     'ask_user',
     // Tested: letting the controller provide submit_plan instead (the way
     // Mastra Code does) does not avoid the resume re-gate — the approved call
-    // still replays as output-denied. The workaround in cli.ts stays.
+    // still replays as output-denied. The correction in
+    // request/plan-approval.ts stays.
     'submit_plan',
     'task_write',
     'task_update',

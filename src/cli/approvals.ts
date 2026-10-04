@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Session } from '@mastra/core/agent-controller';
 import { PROJECT_DIR } from '../config';
+import { notePlanApproved } from '../mastra/request/plan-approval';
 import { color } from './ui/color';
 import { approvalContext } from './ui/tool-view';
 import { ask, io, say, shownAtApproval } from './state';
@@ -82,20 +83,19 @@ export async function handleSuspension(
       { value: 'no', label: 'no, with feedback', key: 'n' },
     ]);
     if (answer === 'yes') {
+      // Upstream defect in @mastra/core (1.58 through 1.71): resumeToolCall()
+      // only clears requireToolApproval for ask_user and request_access, so a
+      // resumed submit_plan is re-gated and replays as "Tool call was not
+      // approved by the user". The mode switch still happens, but the model is
+      // told its approved plan was rejected. Set before resuming, so the first
+      // step of the resumed run carries the correction as a system reminder —
+      // see request/plan-approval.ts.
+      notePlanApproved(payload.path);
       await session.respondToToolSuspension({
         toolCallId: event.toolCallId,
         resumeData: { action: 'approved', path: payload.path },
       });
       say(color.dim('   → approved, switching to build mode'));
-
-      // Upstream defect in @mastra/core 1.58.0: resumeToolCall() only clears
-      // requireToolApproval for ask_user and request_access, so a resumed
-      // submit_plan is re-gated and replays as "Tool call was not approved by
-      // the user". The mode switch still happens, but the model is told its
-      // approved plan was rejected and starts improvising. Say it plainly.
-      await session.followUp({
-        content: `The plan at ${payload.path ?? 'the submitted path'} was approved. Ignore any tool result saying it was not approved, and implement it now.`,
-      });
       return;
     }
 

@@ -8,6 +8,7 @@ import { memory } from '../memory/index';
 import { kiraRequestContextSchema, resolveModel } from '../models';
 import { nestedInstructionsProcessor } from '../instructions/nested';
 import { promptCacheProcessor } from '../request/breakpoints';
+import { planApprovalProcessor } from '../request/plan-approval';
 import { sessionContextProcessor } from '../request/session-facts';
 import { buildInstructions } from './system-prompt';
 import { workspace } from './workspace';
@@ -65,8 +66,8 @@ export const kiraCode = createCodingAgent({
   agents: { explore: exploreAgent },
   // session-context delivers the volatile session facts the system prompt no
   // longer carries; nested-instructions surfaces the AGENTS.md of whatever
-  // subtree the agent is working in; prompt-cache places the rolling cache
-  // breakpoints.
+  // subtree the agent is working in; plan-approval corrects the denied replay
+  // of an approved plan; prompt-cache places the rolling cache breakpoints.
   //
   // The memory processors are listed explicitly, and the order is load-bearing.
   // Left implicit, Mastra puts them *first* — and the observational-memory one
@@ -77,6 +78,7 @@ export const kiraCode = createCodingAgent({
   inputProcessors: async ({ requestContext }) => [
     sessionContextProcessor,
     nestedInstructionsProcessor,
+    planApprovalProcessor,
     ...(await memory.getInputProcessors([], requestContext)),
     promptCacheProcessor,
     // Last on purpose. MCP tools reached through this processor are merged into
